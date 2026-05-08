@@ -1033,7 +1033,15 @@ def parse_args():
                         "0 = never reload (will OOM on large sweeps).")
 
     p.add_argument("--skip-attention", action="store_true",
-                   help="Write empty attention.csv (debug; speeds up first run)")
+                   help="Skip the attention sweep (write empty attention.csv "
+                        "if not already present). Use to split a sweep across "
+                        "multiple processes — Neuron's runtime accumulates HBM "
+                        "across NEFFs within one process, so running attention "
+                        "and dense in separate invocations fits HBM more easily.")
+    p.add_argument("--skip-dense", action="store_true",
+                   help="Skip the dense sweep (do not touch dense.csv).")
+    p.add_argument("--skip-per-seq", action="store_true",
+                   help="Skip the per_sequence sweep (do not touch per_sequence.csv).")
     p.add_argument("--run-tag", default="",
                    help="Optional explicit suffix for profile_timing_<tag>.json. "
                         "If empty (default), the script picks the smallest "
@@ -1152,9 +1160,16 @@ def main():
 
         # --- attention ---
         if args.skip_attention:
-            (out_tp / "attention.csv").write_text(
-                "prefill_chunk,kv_prefill,n_decode,kv_decode,time_us\n")
-            print("  [-] attention.csv (skipped via --skip-attention)")
+            # Only initialize an empty attention.csv if none exists yet —
+            # otherwise we would clobber a CSV produced by an earlier
+            # subprocess run with --skip-dense --skip-per-seq.
+            attn_path = out_tp / "attention.csv"
+            if not attn_path.exists():
+                attn_path.write_text(
+                    "prefill_chunk,kv_prefill,n_decode,kv_decode,time_us\n")
+                print("  [-] attention.csv (skipped via --skip-attention; empty CSV initialised)")
+            else:
+                print("  [-] attention.csv (skipped via --skip-attention; existing CSV preserved)")
         else:
             print("  -- attention sweep --")
             sweep_t0 = time.perf_counter()
@@ -1176,38 +1191,44 @@ def main():
                   f"reload {stage_t['attn_reload_sec']:.1f}s)")
 
         # --- dense ---
-        print("  -- dense sweep --")
-        sweep_t0 = time.perf_counter()
-        dense_rows, dense_shots = sweep_dense(state, arch,
-                                              tokens_grid, args.warmup, args.repeat)
-        stage_t["dense_sec"] = time.perf_counter() - sweep_t0
-        stage_t["dense_reload_sec"] = state.take_reload_sec()
-        stage_t["dense_compile_sec"], stage_t["dense_measure_sec"] = _stage_split(dense_shots)
-        write_t0 = time.perf_counter()
-        write_dense_csv(dense_rows, out_tp / "dense.csv")
-        stage_t["write_sec"] += time.perf_counter() - write_t0
-        stage_t["shots"].extend(dense_shots)
-        print(f"  [✓] dense.csv ({len(dense_rows)} rows; wall {stage_t['dense_sec']:.1f}s; "
-              f"compile {stage_t['dense_compile_sec']:.1f}s, "
-              f"measure {stage_t['dense_measure_sec']:.1f}s, "
-              f"reload {stage_t['dense_reload_sec']:.1f}s)")
+        if args.skip_dense:
+            print("  [-] dense.csv (skipped via --skip-dense)")
+        else:
+            print("  -- dense sweep --")
+            sweep_t0 = time.perf_counter()
+            dense_rows, dense_shots = sweep_dense(state, arch,
+                                                  tokens_grid, args.warmup, args.repeat)
+            stage_t["dense_sec"] = time.perf_counter() - sweep_t0
+            stage_t["dense_reload_sec"] = state.take_reload_sec()
+            stage_t["dense_compile_sec"], stage_t["dense_measure_sec"] = _stage_split(dense_shots)
+            write_t0 = time.perf_counter()
+            write_dense_csv(dense_rows, out_tp / "dense.csv")
+            stage_t["write_sec"] += time.perf_counter() - write_t0
+            stage_t["shots"].extend(dense_shots)
+            print(f"  [✓] dense.csv ({len(dense_rows)} rows; wall {stage_t['dense_sec']:.1f}s; "
+                  f"compile {stage_t['dense_compile_sec']:.1f}s, "
+                  f"measure {stage_t['dense_measure_sec']:.1f}s, "
+                  f"reload {stage_t['dense_reload_sec']:.1f}s)")
 
         # --- per_sequence ---
-        print("  -- per_sequence sweep --")
-        sweep_t0 = time.perf_counter()
-        ps_rows, ps_shots = sweep_per_sequence(state, arch,
-                                               sequences_grid, args.warmup, args.repeat)
-        stage_t["per_seq_sec"] = time.perf_counter() - sweep_t0
-        stage_t["per_seq_reload_sec"] = state.take_reload_sec()
-        stage_t["per_seq_compile_sec"], stage_t["per_seq_measure_sec"] = _stage_split(ps_shots)
-        write_t0 = time.perf_counter()
-        write_per_sequence_csv(ps_rows, out_tp / "per_sequence.csv")
-        stage_t["write_sec"] += time.perf_counter() - write_t0
-        stage_t["shots"].extend(ps_shots)
-        print(f"  [✓] per_sequence.csv ({len(ps_rows)} rows; wall {stage_t['per_seq_sec']:.1f}s; "
-              f"compile {stage_t['per_seq_compile_sec']:.1f}s, "
-              f"measure {stage_t['per_seq_measure_sec']:.1f}s, "
-              f"reload {stage_t['per_seq_reload_sec']:.1f}s)")
+        if args.skip_per_seq:
+            print("  [-] per_sequence.csv (skipped via --skip-per-seq)")
+        else:
+            print("  -- per_sequence sweep --")
+            sweep_t0 = time.perf_counter()
+            ps_rows, ps_shots = sweep_per_sequence(state, arch,
+                                                   sequences_grid, args.warmup, args.repeat)
+            stage_t["per_seq_sec"] = time.perf_counter() - sweep_t0
+            stage_t["per_seq_reload_sec"] = state.take_reload_sec()
+            stage_t["per_seq_compile_sec"], stage_t["per_seq_measure_sec"] = _stage_split(ps_shots)
+            write_t0 = time.perf_counter()
+            write_per_sequence_csv(ps_rows, out_tp / "per_sequence.csv")
+            stage_t["write_sec"] += time.perf_counter() - write_t0
+            stage_t["shots"].extend(ps_shots)
+            print(f"  [✓] per_sequence.csv ({len(ps_rows)} rows; wall {stage_t['per_seq_sec']:.1f}s; "
+                  f"compile {stage_t['per_seq_compile_sec']:.1f}s, "
+                  f"measure {stage_t['per_seq_measure_sec']:.1f}s, "
+                  f"reload {stage_t['per_seq_reload_sec']:.1f}s)")
 
         stage_t["reload_count"] = state.reload_count
         stage_t["reload_sec_total"] = state.reload_sec_total
