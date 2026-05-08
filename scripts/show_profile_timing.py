@@ -52,22 +52,34 @@ from typing import Any, Dict, List, Optional, Tuple
 def find_timing_files(path: Path) -> List[Tuple[str, Path]]:
     """Return [(label, file), ...] for either a JSON file or a directory.
 
-    Picks up tagged variants like profile_timing_cold.json /
-    profile_timing_hot.json alongside the canonical names.
+    Search locations (when given a directory):
+      <dir>/profile_timing*.json           ← legacy variant-level files
+      <dir>/validation_timing*.json
+      <dir>/tp*/profile_timing*.json       ← current per-TP files
+
+    Both numbered (profile_timing_0.json) and tagged
+    (profile_timing_cold.json) names are picked up.
     """
     out: List[Tuple[str, Path]] = []
     if path.is_file() and path.suffix == ".json":
         out.append((path.parent.name, path))
         return out
     if path.is_dir():
-        # Glob both tagged + untagged. Sort for deterministic ordering.
+        # Glob variant root + per-TP folders. Sort for deterministic ordering.
         candidates = sorted(set(
             list(path.glob("profile_timing*.json"))
             + list(path.glob("validation_timing*.json"))
+            + list(path.glob("tp*/profile_timing*.json"))
         ))
         for f in candidates:
-            rel = "/".join(path.parts[-3:])
-            out.append((f"{rel}::{f.stem}", f))
+            # Label embeds the relative path from the given root, so per-TP
+            # files appear as e.g. "Llama-3.2-1B/bf16/tp1::profile_timing_0".
+            try:
+                rel = f.parent.relative_to(path)
+                rel_str = "/".join(path.parts[-3:]) + (f"/{rel}" if str(rel) != "." else "")
+            except ValueError:
+                rel_str = "/".join(path.parts[-3:])
+            out.append((f"{rel_str}::{f.stem}", f))
         if not out:
             print(f"[!] no timing JSONs found under {path}", file=sys.stderr)
     return out
@@ -101,12 +113,36 @@ def summarize_profile(timing: Dict[str, Any]) -> Dict[str, Any]:
             cat = s.get("category", "?")
             d = by_cat.setdefault(cat, {"shots": 0, "wall_us": 0,
                                         "compile_us": 0,
-                                        "mean_us_sum": 0})
+                                        "mean_us_sum": 0,
+                                        # Roofline aggregates (sum across
+                                        # shots in this category, then
+                                        # divide by sum of latencies).
+                                        "flops_sum": 0.0,
+                                        "bytes_sum": 0.0,
+                                        "lat_us_sum": 0.0})
             d["shots"] += 1
             d["wall_us"] += s.get("wall_us", 0)
             d["compile_us"] += s.get("compile_us", 0)
             # Accept both new (mean_us) and old (median_us) field names.
-            d["mean_us_sum"] += s.get("mean_us", s.get("median_us", 0))
+            lat_us = s.get("mean_us", s.get("median_us", 0))
+            d["mean_us_sum"] += lat_us
+            d["flops_sum"]   += s.get("flops", 0.0)
+            d["bytes_sum"]   += s.get("bytes", 0.0)
+            d["lat_us_sum"]  += lat_us
+        # New breakdown fields (compile/measure/reload/loop_overhead per
+        # stage) added by recent profile_neuron.py changes; missing in
+        # older profile_timing files. Aggregate across stages where
+        # present, else fall back to per-shot sums.
+        compile_sec_total = sum(st.get(f"{s}_compile_sec", 0.0)
+                                for s in ("dense", "per_seq", "attn"))
+        measure_sec_total = sum(st.get(f"{s}_measure_sec", 0.0)
+                                for s in ("dense", "per_seq", "attn"))
+        reload_sec_total  = st.get("reload_sec_total",
+                                   sum(st.get(f"{s}_reload_sec", 0.0)
+                                       for s in ("dense", "per_seq", "attn")))
+        loop_overhead_total = sum(st.get(f"{s}_loop_overhead_sec", 0.0)
+                                  for s in ("dense", "per_seq", "attn"))
+
         out["tp_summary"][tp] = {
             "load_sec": st.get("load_sec"),
             "dense_sec": st.get("dense_sec"),
@@ -120,6 +156,12 @@ def summarize_profile(timing: Dict[str, Any]) -> Dict[str, Any]:
             "compile_pct_of_wall": (compile_us_sum / wall_us_sum * 100
                                     if wall_us_sum else 0.0),
             "by_category": by_cat,
+            # New breakdown rollups (zero if older format).
+            "compile_sec":       compile_sec_total,
+            "measure_sec":       measure_sec_total,
+            "reload_sec":        reload_sec_total,
+            "loop_overhead_sec": loop_overhead_total,
+            "reload_count":      st.get("reload_count", 0),
         }
     return out
 
@@ -166,8 +208,9 @@ def render_profile_summary(label: str, summary: Dict[str, Any], shots: bool,
                      f"torch={m.get('torch','?')}  "
                      f"torch_xla={m.get('torch_xla','?')}")
 
-    # Stage table per TP
+    # Stage table per TP — wall time per stage
     lines.append("")
+    lines.append("  Per-TP stage wall time:")
     lines.append("  TP    load     dense    per_seq   attn      write    total    "
                  "n_shots  compile%")
     lines.append("  ─────────────────────────────────────────────────────────"
@@ -183,6 +226,27 @@ def render_profile_summary(label: str, summary: Dict[str, Any], shots: bool,
                      f" {s['n_shots']:5d}    "
                      f"{s['compile_pct_of_wall']:5.1f}%")
 
+    # Per-TP cost decomposition (compile + measure + reload + loop_overhead)
+    has_breakdown = any(s.get("compile_sec", 0.0) or s.get("measure_sec", 0.0)
+                        for s in summary["tp_summary"].values())
+    if has_breakdown:
+        lines.append("")
+        lines.append("  Per-TP cost breakdown (sums to ~total above):")
+        lines.append("  TP    compile  measure  reload  loop_oh   load    write    "
+                     "total    reloads")
+        lines.append("  ─────────────────────────────────────────────────────────"
+                     "──────────────────")
+        for tp in sorted(summary["tp_summary"].keys(), key=lambda x: int(x)):
+            s = summary["tp_summary"][tp]
+            lines.append(f"  {tp:<5s} {fmt_dur(s['compile_sec'])} "
+                         f"{fmt_dur(s['measure_sec'])} "
+                         f"{fmt_dur(s['reload_sec'])} "
+                         f"{fmt_dur(s['loop_overhead_sec'])} "
+                         f"{fmt_dur(s['load_sec'])} "
+                         f"{fmt_dur(s['write_sec'])} "
+                         f"{fmt_dur(s['total_sec'])} "
+                         f"  {s['reload_count']}")
+
     if by_category:
         lines.append("")
         lines.append("  By category (per TP):")
@@ -194,11 +258,23 @@ def render_profile_summary(label: str, summary: Dict[str, Any], shots: bool,
                 comp_s = d["compile_us"] / 1e6
                 meas_s = (d["wall_us"] - d["compile_us"]) / 1e6
                 avg_mean_us = (d["mean_us_sum"] / d["shots"]) if d["shots"] else 0
+                # Effective TFLOPS = sum(flops) / sum(latency_us) / 1e6.
+                # Effective GB/s   = sum(bytes) / sum(latency_us) / 1e3.
+                eff_tflops = (d["flops_sum"] / d["lat_us_sum"] / 1e6
+                              if d["lat_us_sum"] > 0 else 0.0)
+                eff_gbs    = (d["bytes_sum"] / d["lat_us_sum"] / 1e3
+                              if d["lat_us_sum"] > 0 else 0.0)
+                arith_int  = (d["flops_sum"] / d["bytes_sum"]
+                              if d["bytes_sum"] > 0 else 0.0)
                 lines.append(f"      {cat:14s} shots={d['shots']:4d}   "
                              f"wall={wall_s:7.1f}s   "
                              f"compile={comp_s:7.1f}s   "
                              f"measure={meas_s:7.1f}s   "
                              f"mean t≈{avg_mean_us:9.2f} us")
+                if d["flops_sum"] > 0 or d["bytes_sum"] > 0:
+                    lines.append(f"      {'':14s} eff TFLOPS={eff_tflops:6.2f}   "
+                                 f"eff BW={eff_gbs:7.1f} GB/s   "
+                                 f"AI={arith_int:7.2f} flops/B")
 
     if shots:
         lines.append("")
@@ -212,19 +288,23 @@ def render_shots(label: str, timing: Dict[str, Any]) -> str:
     lines: List[str] = [f"=== {label} :: shots ==="]
     for tp, st in timing.get("tp_stages", {}).items():
         lines.append(f"  tp{tp}:")
-        lines.append(f"    {'category':14s} {'layer/regime':18s} {'key':50s}  "
-                     f"{'first_us':>10s} {'mean_us':>10s} {'compile_us':>10s}  "
-                     f"{'wall_us':>10s}")
+        lines.append(f"    {'category':14s} {'layer/regime':18s} {'key':40s}  "
+                     f"{'mean_us':>9s} {'compile_us':>10s} "
+                     f"{'TFLOPS':>7s} {'GB/s':>7s} {'AI':>7s}")
         for s in st.get("shots", []):
             cat = s.get("category", "?")
             lay = s.get("layer", s.get("regime", "?"))
             key = json.dumps(s.get("key", {}), separators=(",", ":"))
             mean_us = s.get("mean_us", s.get("median_us", 0))  # back-compat
-            lines.append(f"    {cat:14s} {lay:18s} {key[:50]:50s}  "
-                         f"{s.get('first_call_us',0):10.1f} "
-                         f"{mean_us:10.1f} "
-                         f"{s.get('compile_us',0):10.1f}  "
-                         f"{s.get('wall_us',0):10.1f}")
+            flops = s.get("flops", 0.0)
+            bts   = s.get("bytes", 0.0)
+            tflops = (flops / mean_us / 1e6) if mean_us > 0 and flops else 0.0
+            gbs    = (bts / mean_us / 1e3) if mean_us > 0 and bts else 0.0
+            ai     = (flops / bts) if bts > 0 and flops else 0.0
+            lines.append(f"    {cat:14s} {lay:18s} {key[:40]:40s}  "
+                         f"{mean_us:9.1f} "
+                         f"{s.get('compile_us',0):10.1f} "
+                         f"{tflops:7.2f} {gbs:7.1f} {ai:7.2f}")
     return "\n".join(lines)
 
 

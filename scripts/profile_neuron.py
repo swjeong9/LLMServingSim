@@ -285,6 +285,105 @@ def build_dummy_input(kind: str, n: int, cfg, dtype, device, batch: int = 1):
 
 
 # ======================================================================
+# Analytical FLOPs + bytes (for roofline-style efficiency analysis)
+# ======================================================================
+def _dtype_bytes(dtype) -> int:
+    """Bytes per element for our supported activation dtypes."""
+    rt = _lazy_import_runtime()
+    torch = rt["torch"]
+    if dtype == torch.float32:
+        return 4
+    if dtype in (torch.bfloat16, torch.float16):
+        return 2
+    if dtype == torch.float8_e4m3fn or getattr(torch, "float8_e4m3fn", None) == dtype:
+        return 1
+    return 2  # default bf16/fp16
+
+def shot_flops_bytes(category: str, layer: str, key: Dict[str, int],
+                     cfg, dtype) -> Tuple[float, float]:
+    """Return (flops, bytes_accessed) for one shot, given the cfg of the
+    post-shard model and the activation dtype.
+
+    bytes_accessed sums weight reads + input activation reads + output
+    activation writes for the kernel(s) executed in the shot. Weights are
+    counted in bytes-of-the-weight-dtype (= activation dtype here, since
+    we don't quantize separately during profiling).
+
+    flops counts multiply-accumulate as 2 ops (the standard).
+    """
+    H        = cfg.hidden_size
+    n_heads  = cfg.num_attention_heads
+    n_kv     = cfg.num_key_value_heads
+    head_dim = cfg.head_dim
+    q_dim    = n_heads * head_dim
+    kv_dim   = n_kv * head_dim
+    inter    = cfg.intermediate_size
+    vocab    = cfg.vocab_size
+    db       = _dtype_bytes(dtype)
+
+    if category == "dense":
+        T = int(key.get("tokens", 0))
+        if T == 0: return 0.0, 0.0
+        if layer == "embedding":
+            return 0.0, float(2 * T * H * db)            # gather; ~ in+out
+        if layer in ("layernorm", "final_layernorm"):
+            return float(5 * T * H), float(2 * T * H * db + H * db)
+        if layer == "qkv_proj":
+            out_dim = q_dim + 2 * kv_dim
+            return (float(2 * T * H * out_dim),
+                    float(H * out_dim * db + T * (H + out_dim) * db))
+        if layer == "o_proj":
+            return (float(2 * T * q_dim * H),
+                    float(q_dim * H * db + T * (q_dim + H) * db))
+        if layer == "gate_up_proj":
+            return (float(2 * T * H * 2 * inter),
+                    float(H * 2 * inter * db + T * (H + 2 * inter) * db))
+        if layer == "down_proj":
+            return (float(2 * T * inter * H),
+                    float(inter * H * db + T * (inter + H) * db))
+        if layer == "act_fn":
+            return float(5 * T * inter), float(3 * T * inter * db)   # 2-in, 1-out
+        if layer == "rotary_emb":
+            return float(2 * T * q_dim), float(2 * T * q_dim * db)
+        if layer == "qk_norm":
+            return float(5 * T * (q_dim + kv_dim)), float(2 * T * (q_dim + kv_dim) * db)
+        return 0.0, 0.0
+
+    if category == "per_sequence":
+        S = int(key.get("sequences", 0))
+        if S == 0: return 0.0, 0.0
+        if layer == "lm_head":
+            return (float(2 * S * H * vocab),
+                    float(H * vocab * db + S * (H + vocab) * db))
+        if layer == "sampler":
+            return float(5 * S * vocab), float(2 * S * vocab * db)
+        return 0.0, 0.0
+
+    if category == "attention":
+        pc   = int(key.get("prefill_chunk", 0))
+        kv_p = int(key.get("kv_prefill",    0))
+        n    = int(key.get("n_decode",      0))
+        kv_d = int(key.get("kv_decode",     0))
+        # Profiler replicates K/V to match Q heads (post-GQA), so SDPA
+        # sees n_heads on all of Q/K/V — flops accounting uses n_heads.
+        if pc > 0 and n == 0:
+            B, q_len, k_len = 1, pc, pc + kv_p
+        elif n > 0 and pc == 0:
+            B, q_len, k_len = n, 1, kv_d + 1
+        else:
+            return 0.0, 0.0
+        flops = 4.0 * B * n_heads * q_len * k_len * head_dim   # QK^T + (attn @ V)
+        bytes_act = float(db) * (
+            B * n_heads * q_len * head_dim +     # Q in
+            2 * B * n_heads * k_len * head_dim + # K + V in
+            B * n_heads * q_len * head_dim       # output
+        )
+        return flops, bytes_act
+
+    return 0.0, 0.0
+
+
+# ======================================================================
 # Synchronous Neuron-aware timing
 # ======================================================================
 def time_callable(fn: Callable[[], Any], warmup: int, repeat: int
@@ -526,10 +625,14 @@ def sweep_dense(state: "_RuntimeState", arch: str,
                 print(f"    [WARN] dense {layer_name} n={n} failed: {e}")
                 continue
             rows.append((layer_name, n, t_us))
+            flops, bts = shot_flops_bytes("dense", layer_name,
+                                          {"tokens": n}, state.cfg, state.dtype)
             shot_timings.append({
                 "category": "dense",
                 "layer": layer_name,
                 "key": {"tokens": n},
+                "flops": flops,
+                "bytes": bts,
                 **meta,
             })
             print(f"    dense  {layer_name:18s} tokens={n:5d}  -> {t_us:9.3f} us  "
@@ -572,10 +675,14 @@ def sweep_per_sequence(state: "_RuntimeState", arch: str,
                 print(f"    [WARN] per_seq {layer_name} s={s} failed: {e}")
                 continue
             rows.append((layer_name, s, t_us))
+            flops, bts = shot_flops_bytes("per_sequence", layer_name,
+                                          {"sequences": s}, state.cfg, state.dtype)
             shot_timings.append({
                 "category": "per_sequence",
                 "layer": layer_name,
                 "key": {"sequences": s},
+                "flops": flops,
+                "bytes": bts,
                 **meta,
             })
             print(f"    per_s  {layer_name:18s} seqs={s:5d}    -> {t_us:9.3f} us  "
@@ -673,11 +780,16 @@ def sweep_attention(state: "_RuntimeState", arch: str,
                 print(f"    [WARN] attn prefill pc={pc} kv_p={kv_p} failed: {e}")
                 continue
             rows.append((pc, kv_p, 0, 0, t_kernel))
+            attn_key = {"prefill_chunk": pc, "kv_prefill": kv_p,
+                        "n_decode": 0, "kv_decode": 0}
+            flops, bts = shot_flops_bytes("attention", "attention",
+                                          attn_key, state.cfg, state.dtype)
             shot_timings.append({
                 "category": "attention",
                 "regime": "prefill",
-                "key": {"prefill_chunk": pc, "kv_prefill": kv_p,
-                        "n_decode": 0, "kv_decode": 0},
+                "key": attn_key,
+                "flops": flops,
+                "bytes": bts,
                 "t_kernel_us": t_kernel,
                 **meta,
             })
@@ -703,11 +815,16 @@ def sweep_attention(state: "_RuntimeState", arch: str,
                 print(f"    [WARN] attn decode n={n} kv_d={kv_d} failed: {e}")
                 continue
             rows.append((0, 0, n, kv_d, t_kernel))
+            attn_key = {"prefill_chunk": 0, "kv_prefill": 0,
+                        "n_decode": n, "kv_decode": kv_d}
+            flops, bts = shot_flops_bytes("attention", "attention",
+                                          attn_key, state.cfg, state.dtype)
             shot_timings.append({
                 "category": "attention",
                 "regime": "decode",
-                "key": {"prefill_chunk": 0, "kv_prefill": 0,
-                        "n_decode": n, "kv_decode": kv_d},
+                "key": attn_key,
+                "flops": flops,
+                "bytes": bts,
                 "t_kernel_us": t_kernel,
                 **meta,
             })
@@ -886,16 +1003,28 @@ def main():
           f"heads={cfg0.num_attention_heads}, kv_heads={cfg0.num_key_value_heads}, "
           f"inter={cfg0.intermediate_size}")
 
-    # Profile-time accounting (saved as profile_timing.json at end)
-    timing_run = {
-        "schema": "profile_timing-v1",
-        "model": args.model, "hardware": args.hardware, "variant": variant,
-        "started_at": time.strftime("%Y-%m-%dT%H:%M:%S+00:00", time.gmtime()),
-        "machine": _capture_machine_info(),
-        "args": _capture_runtime_args(args),
-        "tp_stages": {},   # tp → {load_sec, dense_sec, per_seq_sec, attn_sec, write_sec, total_sec, shots: [...]}
-    }
-    run_t0 = time.perf_counter()
+    # Per-TP profile_timing files are written inside the loop. We capture
+    # machine info / args once up front (identical across TPs in a single
+    # invocation) so each per-TP file embeds the full context.
+    machine_info = _capture_machine_info()
+    runtime_args = _capture_runtime_args(args)
+
+    def _pick_run_tag(folder: Path, override: str) -> str:
+        """Return the explicit run tag if provided, else the smallest
+        non-negative integer N for which profile_timing_<N>.json does
+        not yet exist under ``folder``."""
+        if override:
+            return override
+        import re as _re
+        used = set()
+        for f in folder.glob("profile_timing_*.json"):
+            m = _re.match(r"profile_timing_(\d+)\.json$", f.name)
+            if m:
+                used.add(int(m.group(1)))
+        n = 0
+        while n in used:
+            n += 1
+        return str(n)
 
     def _stage_split(shots):
         """Split shot wall-time into compile (cold-cache first call) vs.
@@ -908,6 +1037,7 @@ def main():
         print(f"\n========== TP={tp} ==========")
         out_tp = out_root / f"tp{tp}"
         out_tp.mkdir(exist_ok=True)
+        tp_started_at = time.strftime("%Y-%m-%dT%H:%M:%S+00:00", time.gmtime())
         stage_t = {"load_sec": 0.0,
                    "dense_sec": 0.0, "dense_compile_sec": 0.0,
                    "dense_measure_sec": 0.0, "dense_reload_sec": 0.0,
@@ -1038,8 +1168,6 @@ def main():
         unaccounted = max(stage_t["total_sec"] - accounted, 0.0)
         stage_t["unaccounted_sec"] = unaccounted
 
-        timing_run["tp_stages"][str(tp)] = stage_t
-
         T = stage_t["total_sec"]
         def pct(x): return f"({100*x/T:5.1f}%)" if T > 0 else "(  -  )"
         print(f"\n  [⏱] tp{tp} breakdown — total {T:.1f}s")
@@ -1054,6 +1182,33 @@ def main():
         print(f"        unaccounted    : {unaccounted:8.1f}s   {pct(unaccounted)}   "
               f"(setup, free_model)")
 
+        # Write per-TP profile_timing_<N>.json. Auto-numbering is scoped
+        # to this tp<N>/ folder so each TP runs independently — partial
+        # progress survives Ctrl-C, and per-TP bundles are self-contained
+        # for sharing.
+        per_tp_tag = _pick_run_tag(out_tp, args.run_tag)
+        per_tp_timing = {
+            "schema": "profile_timing-v1",
+            "model": args.model,
+            "hardware": args.hardware,
+            "variant": variant,
+            "tp": tp,
+            "run_tag": per_tp_tag,
+            "started_at": tp_started_at,
+            "ended_at": time.strftime("%Y-%m-%dT%H:%M:%S+00:00", time.gmtime()),
+            "wall_clock_total_sec": stage_t["total_sec"],
+            "machine": machine_info,
+            "args": runtime_args,
+            # Single-key tp_stages keeps the schema identical to the older
+            # variant-level file so show_profile_timing.py / downstream
+            # parsers don't need a special case.
+            "tp_stages": {str(tp): stage_t},
+        }
+        per_tp_path = out_tp / f"profile_timing_{per_tp_tag}.json"
+        import json as _json
+        per_tp_path.write_text(_json.dumps(per_tp_timing, indent=2, default=str))
+        print(f"  [✓] {per_tp_path.name} written ({per_tp_path})")
+
     write_meta(out_root, args.hardware, args.model, variant, tps,
                arch, args.dtype, args.max_position_embeddings,
                tokens_grid, sequences_grid,
@@ -1062,33 +1217,9 @@ def main():
                args.max_num_batched_tokens, args.max_num_seqs)
     print(f"\n[✓] meta.yaml written")
 
-    # Save timing artifact (re-loadable for comparison via show_profile_timing.py).
-    # Default policy: auto-pick the smallest non-negative integer N for which
-    # profile_timing_<N>.json does not yet exist, so repeated invocations
-    # never overwrite earlier results. --run-tag overrides with a custom name.
-    timing_run["ended_at"] = time.strftime("%Y-%m-%dT%H:%M:%S+00:00", time.gmtime())
-    timing_run["wall_clock_total_sec"] = time.perf_counter() - run_t0
-    if args.run_tag:
-        tag = args.run_tag
-    else:
-        import re as _re
-        used = set()
-        for f in out_root.glob("profile_timing_*.json"):
-            m = _re.match(r"profile_timing_(\d+)\.json$", f.name)
-            if m:
-                used.add(int(m.group(1)))
-        n = 0
-        while n in used:
-            n += 1
-        tag = str(n)
-    timing_run["run_tag"] = tag
-    timing_filename = f"profile_timing_{tag}.json"
-    timing_path = out_root / timing_filename
-    import json as _json
-    timing_path.write_text(_json.dumps(timing_run, indent=2, default=str))
-    print(f"[✓] {timing_filename} written ({timing_path}, "
-          f"total {timing_run['wall_clock_total_sec']/60:.1f} min)")
-
+    # Per-TP profile_timing_<N>.json files are written inside the TP loop
+    # (see above). No variant-level summary — each TP folder is now
+    # self-contained; show_profile_timing.py auto-discovers under tp<N>/.
     print(f"[✓] Done. Variant root: {out_root}")
 
 
