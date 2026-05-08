@@ -224,6 +224,7 @@ Qwen3-14B           : full  31.1 GB, 1-layer trick:  5.33 GB
 
 ```
 인스턴스: inf2.xlarge (단일 코어 1-layer 트릭으로 충분)
+        또는 inf2.24xlarge (이 가이드 사용자의 실제 환경; 코어 12개)
 이미지: Deep Learning AMI Neuron PyTorch 2.x (Ubuntu 22.04)
 ```
 
@@ -232,6 +233,33 @@ Qwen3-14B           : full  31.1 GB, 1-layer trick:  5.33 GB
 neuron-ls           # NeuronCore-v2 들 인식 확인
 neuron-top          # 자원 상태 (Ctrl+C 로 빠져나옴)
 ```
+
+**참고 — `neuron-ls` 실제 출력 (inf2.24xlarge, 2026-05-08)**:
+
+```
+instance-type: inf2.24xlarge
+instance-id: i-00a9f3ecb6d998968
++--------+--------+----------+--------+-----------+--------------+-------------+------+
+| NEURON | NEURON |  NEURON  | NEURON | CONNECTED |     PCI      |     CPU     | NUMA |
+| DEVICE | CORES  | CORE IDS | MEMORY |  DEVICES  |     BDF      |  AFFINITY   | NODE |
++--------+--------+----------+--------+-----------+--------------+-------------+------+
+| 0      | 2      | 0-1      | 32 GB  | 1         | 0000:20:1e.0 | 24-47,72-95 | 1    |
+| 1      | 2      | 2-3      | 32 GB  | 0, 2      | 0000:20:1f.0 | 24-47,72-95 | 1    |
+| 2      | 2      | 4-5      | 32 GB  | 1, 3      | 0000:10:1e.0 | 0-23,48-71  | 0    |
+| 3      | 2      | 6-7      | 32 GB  | 2, 4      | 0000:10:1f.0 | 0-23,48-71  | 0    |
+| 4      | 2      | 8-9      | 32 GB  | 3, 5      | 0000:10:1d.0 | 0-23,48-71  | 0    |
+| 5      | 2      | 10-11    | 32 GB  | 4         | 0000:20:1d.0 | 24-47,72-95 | 1    |
++--------+--------+----------+--------+-----------+--------------+-------------+------+
+```
+
+읽는 법:
+- **NEURON DEVICE**: 물리 chip (Inferentia 2 칩). 6개 = inf2.24xlarge.
+- **NEURON CORES / CORE IDS**: 칩당 NeuronCore-v2 2개. 코어 ID 0~11 까지 12개.
+- **NEURON MEMORY**: chip 단위 HBM (32 GB). 한 chip 의 2 코어가 공유. 본 가이드 cluster config 의 `npu_mem.mem_size = 16 GB` 는 코어당 환산값.
+- **CONNECTED DEVICES**: chip 간 NeuronLink 토폴로지 (ring). 칩 0↔1↔2↔3↔4↔5↔0.
+- **CPU AFFINITY / NUMA**: 칩 0,1,5 는 NUMA node 1 / 칩 2,3,4 는 NUMA node 0. 본 가이드 sweep 은 단일 칩만 쓰니까 무시해도 됨.
+
+본 가이드의 `profile_neuron.py` 와 `validate_eager.py` 는 모두 **단일 NeuronCore (예: 코어 0)** 만 사용. 다른 코어들은 idle. TP=8 같은 멀티코어 토폴로지도 1-layer 트릭 + `hf_overrides` 로 단일 코어에서 emulate.
 
 ### 2.2 의존성
 
