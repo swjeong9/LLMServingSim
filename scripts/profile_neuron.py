@@ -806,16 +806,27 @@ def sweep_attention(state: "_RuntimeState", arch: str,
     shot_timings: List[Dict[str, Any]] = []
 
     # ---- Pure prefill (pc, kv_p, 0, 0) ----
+    # Loop-overhead optimization: when kv_p == 0 (our default sweep, since
+    # we don't profile chunked prefill), the prefill mask is just an
+    # ordinary causal mask. Skip building the (pc, pc) bool tensor and
+    # let SDPA generate it internally via is_causal=True. For attn shots
+    # with pc up to 6144 this saves ~1-3 s of mask-construction overhead
+    # per shot (a 4096×4096 bool tensor allocation + masked_fill).
     for pc in prefill_grid:
         for kv_p in kv_prefill_grid:
             if pc + kv_p > state.cfg.max_position_embeddings:
                 continue
             q, k, v = _build_qkv(B=1, q_len=pc, k_len=pc + kv_p)
-            attn_mask = _build_prefill_mask(pc, kv_p)
+            if kv_p == 0:
+                attn_mask = None
+                use_causal = True
+            else:
+                attn_mask = _build_prefill_mask(pc, kv_p)
+                use_causal = False
 
-            def call(q=q, k=k, v=v, m=attn_mask):
+            def call(q=q, k=k, v=v, m=attn_mask, ic=use_causal):
                 return F.scaled_dot_product_attention(q, k, v, attn_mask=m,
-                                                      is_causal=False)
+                                                      is_causal=ic)
 
             try:
                 t_kernel, meta = time_callable(call, warmup, repeat)
