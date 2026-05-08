@@ -97,6 +97,48 @@ def _lazy_import_runtime():
     }
 
 
+def _xla_device(rt):
+    txla = rt["torch_xla"]
+    if hasattr(txla, "device"):
+        try:
+            return txla.device()
+        except TypeError:
+            pass
+    return rt["xm"].xla_device()
+
+
+def _get_sync(rt):
+    """Return a zero-arg sync callable. Prefers torch_xla.sync() (>= 2.4)
+    over the deprecated xm.mark_step() + xm.wait_device_ops() pair."""
+    txla = rt["torch_xla"]
+    if hasattr(txla, "sync"):
+        return lambda: txla.sync()
+    xm = rt["xm"]
+    def _legacy():
+        xm.mark_step()
+        xm.wait_device_ops()
+    return _legacy
+
+
+def _model_from_config(AutoModelForCausalLM, cfg, dtype):
+    """Prefer ``dtype=`` kwarg (transformers >= 4.50) over deprecated ``torch_dtype=``."""
+    try:
+        return AutoModelForCausalLM.from_config(cfg, dtype=dtype).eval()
+    except TypeError:
+        return AutoModelForCausalLM.from_config(cfg, torch_dtype=dtype).eval()
+
+
+def _set_cfg_dtype(cfg, dtype):
+    """Set config dtype using non-deprecated attribute when available."""
+    if hasattr(cfg, "dtype"):
+        try:
+            cfg.dtype = dtype
+            return
+        except Exception:
+            pass
+    cfg.torch_dtype = dtype
+
+
 # ======================================================================
 # Layer occurrence counts per architecture
 # ======================================================================
@@ -282,7 +324,7 @@ def load_full_model(model_id: str, num_layers: Optional[int],
     """Load HF model with NUM_LAYERS = full (or override). Random weights."""
     rt = _lazy_import_runtime()
     torch = rt["torch"]
-    xm = rt["xm"]
+    sync = _get_sync(rt)
 
     dtype = {"bfloat16": torch.bfloat16, "float16": torch.float16,
              "float32": torch.float32}[dtype_str]
@@ -291,13 +333,12 @@ def load_full_model(model_id: str, num_layers: Optional[int],
         cfg.num_hidden_layers = num_layers
     cfg.max_position_embeddings = min(
         getattr(cfg, "max_position_embeddings", max_pos), max_pos)
-    cfg.torch_dtype = dtype
+    _set_cfg_dtype(cfg, dtype)
 
-    model = rt["AutoModelForCausalLM"].from_config(cfg, torch_dtype=dtype).eval()
-    device = xm.xla_device()
+    model = _model_from_config(rt["AutoModelForCausalLM"], cfg, dtype)
+    device = _xla_device(rt)
     model = model.to(device)
-    xm.mark_step()
-    xm.wait_device_ops()
+    sync()
     return model, cfg, device
 
 
@@ -307,7 +348,7 @@ def measure_generation_latency(model, cfg, device, input_len: int,
     """One prefill + (output_len-1) decode steps, summed wall time. Returns us."""
     rt = _lazy_import_runtime()
     torch = rt["torch"]
-    xm = rt["xm"]
+    sync = _get_sync(rt)
 
     input_ids = torch.randint(0, cfg.vocab_size, (1, input_len),
                               dtype=torch.long, device=device)
@@ -318,16 +359,14 @@ def measure_generation_latency(model, cfg, device, input_len: int,
         with torch.no_grad():
             out = model(input_ids=input_ids, past_key_values=None,
                         use_cache=True)
-        xm.mark_step()
-        xm.wait_device_ops()
+        sync()
         pkv = out.past_key_values
         last = input_ids[:, -1:]
         for _ in range(max(0, output_len - 1)):
             with torch.no_grad():
                 out = model(input_ids=last, past_key_values=pkv,
                             use_cache=True)
-            xm.mark_step()
-            xm.wait_device_ops()
+            sync()
             pkv = out.past_key_values
             logits = out.logits[:, -1, :]
             last = torch.argmax(logits, dim=-1, keepdim=True)
@@ -336,27 +375,23 @@ def measure_generation_latency(model, cfg, device, input_len: int,
     samples_us: List[float] = []
     for _ in range(repeat):
         # Prefill
-        xm.mark_step()
-        xm.wait_device_ops()
+        sync()
         t0 = time.perf_counter_ns()
         with torch.no_grad():
             out = model(input_ids=input_ids, past_key_values=None,
                         use_cache=True)
-        xm.mark_step()
-        xm.wait_device_ops()
+        sync()
         iter_ns = time.perf_counter_ns() - t0
 
         pkv = out.past_key_values
         last = input_ids[:, -1:]
         for _ in range(1, max(1, output_len)):
-            xm.mark_step()
-            xm.wait_device_ops()
+            sync()
             t1 = time.perf_counter_ns()
             with torch.no_grad():
                 out = model(input_ids=last, past_key_values=pkv,
                             use_cache=True)
-            xm.mark_step()
-            xm.wait_device_ops()
+            sync()
             iter_ns += time.perf_counter_ns() - t1
             pkv = out.past_key_values
             logits = out.logits[:, -1, :]

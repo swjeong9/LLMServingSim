@@ -97,15 +97,65 @@ from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
 def _lazy_import_runtime():
     """Import torch / torch_xla / torch_neuronx / transformers lazily."""
     import torch
+    import torch_xla
     import torch_xla.core.xla_model as xm
     import torch_neuronx  # noqa: F401  — wires Neuron into torch_xla
     from transformers import AutoConfig, AutoModelForCausalLM
     return {
         "torch": torch,
+        "torch_xla": torch_xla,
         "xm": xm,
         "AutoConfig": AutoConfig,
         "AutoModelForCausalLM": AutoModelForCausalLM,
     }
+
+
+def _xla_device(rt):
+    """Return the current XLA (NeuronCore) device, preferring the new
+    torch_xla.device() over the deprecated xm.xla_device()."""
+    txla = rt["torch_xla"]
+    if hasattr(txla, "device"):
+        try:
+            return txla.device()
+        except TypeError:
+            pass
+    return rt["xm"].xla_device()
+
+
+def _get_sync(rt):
+    """Return a zero-arg callable that flushes pending device ops and
+    waits for completion. Prefers torch_xla.sync() (torch_xla >= 2.4)
+    over the deprecated xm.mark_step() + xm.wait_device_ops() pair."""
+    txla = rt["torch_xla"]
+    if hasattr(txla, "sync"):
+        return lambda: txla.sync()
+    xm = rt["xm"]
+    def _legacy():
+        xm.mark_step()
+        xm.wait_device_ops()
+    return _legacy
+
+
+def _model_from_config(AutoModelForCausalLM, cfg, dtype):
+    """Instantiate model from config, preferring ``dtype=`` kwarg
+    (transformers >= 4.50) over the deprecated ``torch_dtype=``."""
+    try:
+        return AutoModelForCausalLM.from_config(cfg, dtype=dtype).eval()
+    except TypeError:
+        return AutoModelForCausalLM.from_config(cfg, torch_dtype=dtype).eval()
+
+
+def _set_cfg_dtype(cfg, dtype):
+    """Set the config's dtype using the non-deprecated attribute when
+    available. Newer transformers expose ``cfg.dtype``; older ones use
+    ``cfg.torch_dtype``."""
+    if hasattr(cfg, "dtype"):
+        try:
+            cfg.dtype = dtype
+            return
+        except Exception:
+            pass
+    cfg.torch_dtype = dtype
 
 
 # ======================================================================
@@ -260,34 +310,30 @@ def time_callable(fn: Callable[[], Any], warmup: int, repeat: int
     should already live on the Neuron device.
     """
     rt = _lazy_import_runtime()
-    xm = rt["xm"]
+    sync = _get_sync(rt)
 
     warmup_samples: List[float] = []
     timed_samples: List[float] = []
 
     # Warmup. Mirror the timed phase exactly: each fn() call is bracketed
-    # by mark_step + wait_device_ops so the compiled graph in the cache
-    # matches what the timed phase will look up. Without per-call
-    # mark_step, the warmup would build one big N-fn-calls graph and the
-    # timed phase's single-fn-call graph would be a fresh cache miss.
+    # by sync() (= mark_step + wait_device_ops) so the compiled graph in
+    # the cache matches what the timed phase will look up. Without per-call
+    # sync, the warmup would build one big N-fn-calls graph and the timed
+    # phase's single-fn-call graph would be a fresh cache miss.
     for _ in range(warmup):
-        xm.mark_step()
-        xm.wait_device_ops()
+        sync()
         t0 = time.perf_counter_ns()
         out = fn()
-        xm.mark_step()
-        xm.wait_device_ops()
+        sync()
         t1 = time.perf_counter_ns()
         warmup_samples.append((t1 - t0) / 1000.0)
         del out
 
     for _ in range(repeat):
-        xm.mark_step()
-        xm.wait_device_ops()
+        sync()
         t0 = time.perf_counter_ns()
         out = fn()
-        xm.mark_step()
-        xm.wait_device_ops()
+        sync()
         t1 = time.perf_counter_ns()
         timed_samples.append((t1 - t0) / 1000.0)  # ns -> us
         del out
@@ -338,9 +384,9 @@ def load_model(model_id: str, tp: int, dtype_str: str, max_pos: int,
     """Load HF model with num_hidden_layers=1, sharded for TP, on Neuron."""
     rt = _lazy_import_runtime()
     torch = rt["torch"]
-    xm = rt["xm"]
     AutoConfig = rt["AutoConfig"]
     AutoModelForCausalLM = rt["AutoModelForCausalLM"]
+    sync = _get_sync(rt)
 
     dtype = {"bfloat16": torch.bfloat16,
              "float16": torch.float16,
@@ -351,24 +397,23 @@ def load_model(model_id: str, tp: int, dtype_str: str, max_pos: int,
     cfg.max_position_embeddings = min(
         getattr(cfg, "max_position_embeddings", max_pos), max_pos)
     cfg = shard_config(cfg, tp)
-    cfg.torch_dtype = dtype
+    _set_cfg_dtype(cfg, dtype)
 
     # Random weights are fine: we time arithmetic, not correctness.
-    model = AutoModelForCausalLM.from_config(cfg, torch_dtype=dtype).eval()
-    device = xm.xla_device()
+    model = _model_from_config(AutoModelForCausalLM, cfg, dtype)
+    device = _xla_device(rt)
     model = model.to(device)
-    xm.mark_step()
-    xm.wait_device_ops()
+    sync()
     return model, cfg, device, dtype
 
 
 def free_model(model):
     rt = _lazy_import_runtime()
-    xm = rt["xm"]
+    sync = _get_sync(rt)
     del model
     gc.collect()
     try:
-        xm.mark_step()
+        sync()
     except Exception:
         pass
 
