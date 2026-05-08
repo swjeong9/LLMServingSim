@@ -912,27 +912,77 @@ def sweep_attention(state: "_RuntimeState", arch: str,
 # ======================================================================
 # CSV / meta.yaml writers (v1 schema)
 # ======================================================================
+def _read_csv_rows(path: Path, header_len: int) -> List[List[str]]:
+    """Return existing CSV data rows (skipping header) if the file
+    exists and has the expected header arity, else []."""
+    if not path.exists():
+        return []
+    with path.open("r", newline="") as f:
+        r = csv.reader(f)
+        header = next(r, None)
+        if header is None or len(header) != header_len:
+            return []
+        return [row for row in r if len(row) == header_len]
+
+
 def write_dense_csv(rows: List[Tuple[str, int, float]], path: Path) -> None:
+    """Merge-write dense.csv: combines new rows with any existing rows
+    (keyed by (layer, tokens)), with new rows winning on conflict.
+    Necessary because the sweep can be split across multiple subprocesses
+    (e.g. one process per stage to bound HBM); each process writes only
+    its own shots and we don't want to clobber a sibling process's CSV."""
+    merged: Dict[Tuple[str, int], float] = {}
+    for row in _read_csv_rows(path, 3):
+        try:
+            merged[(row[0], int(row[1]))] = float(row[2])
+        except (ValueError, IndexError):
+            continue
+    for layer, n, t in rows:
+        merged[(layer, n)] = t
+    out = sorted(merged.items())
     with path.open("w", newline="") as f:
         w = csv.writer(f)
         w.writerow(["layer", "tokens", "time_us"])
-        for layer, n, t in rows:
+        for (layer, n), t in out:
             w.writerow([layer, n, f"{t:.6g}"])
 
 
 def write_per_sequence_csv(rows: List[Tuple[str, int, float]], path: Path) -> None:
+    """Merge-write per_sequence.csv (see write_dense_csv for rationale)."""
+    merged: Dict[Tuple[str, int], float] = {}
+    for row in _read_csv_rows(path, 3):
+        try:
+            merged[(row[0], int(row[1]))] = float(row[2])
+        except (ValueError, IndexError):
+            continue
+    for layer, s, t in rows:
+        merged[(layer, s)] = t
+    out = sorted(merged.items())
     with path.open("w", newline="") as f:
         w = csv.writer(f)
         w.writerow(["layer", "sequences", "time_us"])
-        for layer, s, t in rows:
+        for (layer, s), t in out:
             w.writerow([layer, s, f"{t:.6g}"])
 
 
 def write_attention_csv(rows: List[Tuple[int, int, int, int, float]], path: Path) -> None:
+    """Merge-write attention.csv (see write_dense_csv for rationale).
+    Particularly important here because attention is split into TWO
+    subprocesses (prefill-only and decode-only) on Inf2 to bound HBM.
+    Without merge, the second subprocess would clobber the first's rows."""
+    merged: Dict[Tuple[int, int, int, int], float] = {}
+    for row in _read_csv_rows(path, 5):
+        try:
+            merged[(int(row[0]), int(row[1]), int(row[2]), int(row[3]))] = float(row[4])
+        except (ValueError, IndexError):
+            continue
+    for pc, kvp, n, kvd, t in rows:
+        merged[(pc, kvp, n, kvd)] = t
+    out = sorted(merged.items())
     with path.open("w", newline="") as f:
         w = csv.writer(f)
         w.writerow(["prefill_chunk", "kv_prefill", "n_decode", "kv_decode", "time_us"])
-        for pc, kvp, n, kvd, t in rows:
+        for (pc, kvp, n, kvd), t in out:
             w.writerow([pc, kvp, n, kvd, f"{t:.6g}"])
 
 
