@@ -261,6 +261,10 @@ for spec in "${MODEL_TPS[@]}"; do
     # (model, TP) we run THREE python invocations, each with a SINGLE
     # TP and a SINGLE stage.
 
+    # Base args common to all subprocesses. Grids are passed PER stage
+    # below so we can split attention into prefill-only and decode-only
+    # (each is the largest individual NEFF cluster on Inf2 — splitting
+    # halves the in-process NEFF count and HBM peak).
     base_args=(
         --model "$model"
         --output-root "$OUTPUT_ROOT"
@@ -270,10 +274,7 @@ for spec in "${MODEL_TPS[@]}"; do
         --max-num-seqs 256
         --tokens-grid "$TOKENS_GRID"
         --sequences-grid "$SEQUENCES_GRID"
-        --prefill-grid "$PREFILL_GRID"
         --kv-prefill-grid "$KV_PREFILL_GRID"
-        --decode-n-grid "$DECODE_N_GRID"
-        --kv-decode-grid "$KV_DECODE_GRID"
         --warmup "$WARMUP"
         --repeat "$REPEAT"
         --reload-every "$RELOAD_EVERY"
@@ -288,31 +289,54 @@ for spec in "${MODEL_TPS[@]}"; do
         # If RUN_TAG is empty, profile_neuron's auto-numbering picks
         # unique integers per tp folder.
         if [[ -n "$RUN_TAG" ]]; then
-            attn_tag_args=(--run-tag "${RUN_TAG}_attn")
+            attn_pre_tag=(--run-tag "${RUN_TAG}_attn_prefill")
+            attn_dec_tag=(--run-tag "${RUN_TAG}_attn_decode")
             dense_tag_args=(--run-tag "${RUN_TAG}_dense")
             perseq_tag_args=(--run-tag "${RUN_TAG}_per_seq")
         else
-            attn_tag_args=()
+            attn_pre_tag=()
+            attn_dec_tag=()
             dense_tag_args=()
             perseq_tag_args=()
         fi
 
-        echo "  >>> [1/3] attention sweep  (TP=$tp, fresh process)"
+        echo "  >>> [1/4] attention PREFILL only  (TP=$tp, fresh process)"
         python scripts/profile_neuron.py "${base_args[@]}" \
             --tp "$tp" \
-            --skip-dense --skip-per-seq "${attn_tag_args[@]}"
+            --skip-dense --skip-per-seq \
+            --prefill-grid "$PREFILL_GRID" \
+            --decode-n-grid "" --kv-decode-grid "" \
+            "${attn_pre_tag[@]}"
 
         echo
-        echo "  >>> [2/3] dense sweep  (TP=$tp, fresh process)"
+        echo "  >>> [2/4] attention DECODE only  (TP=$tp, fresh process)"
         python scripts/profile_neuron.py "${base_args[@]}" \
             --tp "$tp" \
-            --skip-attention --skip-per-seq "${dense_tag_args[@]}"
+            --skip-dense --skip-per-seq \
+            --prefill-grid "" \
+            --decode-n-grid "$DECODE_N_GRID" \
+            --kv-decode-grid "$KV_DECODE_GRID" \
+            "${attn_dec_tag[@]}"
 
         echo
-        echo "  >>> [3/3] per_sequence sweep  (TP=$tp, fresh process)"
+        echo "  >>> [3/4] dense sweep  (TP=$tp, fresh process)"
         python scripts/profile_neuron.py "${base_args[@]}" \
             --tp "$tp" \
-            --skip-attention --skip-dense "${perseq_tag_args[@]}"
+            --skip-attention --skip-per-seq \
+            --prefill-grid "$PREFILL_GRID" \
+            --decode-n-grid "$DECODE_N_GRID" \
+            --kv-decode-grid "$KV_DECODE_GRID" \
+            "${dense_tag_args[@]}"
+
+        echo
+        echo "  >>> [4/4] per_sequence sweep  (TP=$tp, fresh process)"
+        python scripts/profile_neuron.py "${base_args[@]}" \
+            --tp "$tp" \
+            --skip-attention --skip-dense \
+            --prefill-grid "$PREFILL_GRID" \
+            --decode-n-grid "$DECODE_N_GRID" \
+            --kv-decode-grid "$KV_DECODE_GRID" \
+            "${perseq_tag_args[@]}"
     done
 done
 
