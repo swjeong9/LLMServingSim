@@ -10,24 +10,31 @@
 #                                     ≈ 19 k cells; we keep only the two
 #                                     pure regions)
 #
-# Paper grids (extracted from profiler/perf/RTXPRO6000/.../tp1/*.csv):
-#   tokens           152 points (1..16, step1; 20..64, step4;
-#                                 80..256, step16; 272..2048, step16)
-#   sequences         40 points (1..16, step1; 20..64, step4;
-#                                 80..256, step16)
-#   prefill_chunk     19 points (irregular geometric: 16, 24, 32, 36, 54,
-#                                 64, 81, 122, 128, 182, 256, 273, 410,
-#                                 512, 615, 923, 1024, 1384, 2048)
-#   kv_prefill         1 point  (0; chunked prefill disabled)
-#   n_decode           9 points (1, 2, 4, 8, 16, 32, 64, 128, 256)
-#   kv_decode         17 points (16, 32, 64, 128, 256, 512, 768, 1024,
-#                                 1152, 1728, 2048, 2592, 3888, 4096,
-#                                 5832, 8192 + cap)
+# Scenario tweaks vs. paper (max_num_seqs = 32 in our setup):
+#
+#   sequences  : capped at 32      (paper: up to 256)
+#   n_decode   : capped at 32      (paper: up to 256)
+#   tokens     : extended to 8192  (paper: 2048; LENS scenarios reach
+#                                    ~8 k iter tokens with 4 k prefill)
+#   prefill_chunk : extended to 8192  (paper: 2048; attention is O(pc²)
+#                                       so extrapolation isn't safe — we
+#                                       must measure)
+#
+# Final grids:
+#   tokens           157 points (paper 152 + 5 sparse extension to 8192)
+#   sequences         20 points (1..16 step1, 20..32 step4)
+#   prefill_chunk     24 points (paper 19 + 5 sparse to 8192)
+#   kv_prefill         1 point  (0)
+#   n_decode           6 points (1, 2, 4, 8, 16, 32)
+#   kv_decode         16 points (paper, up to 8192; the 8192 entry
+#                                 auto-skips at runtime because
+#                                 kv_d+1 > max_position_embeddings)
 #
 # Per (model, TP):
-#   ~1276 shots × (warmup 10 + repeat 30) = ~51 k forward calls
-#   ~1276 NEFF compiles on first run.
-#   Wall clock: ~3-7 h on first run, minutes on rerun (cache hit).
+#   Llama / Mistral  : ~1239 shots × 40 forwards = ~50 k forward calls
+#   Qwen3 14B        : ~1396 shots × 40 forwards = ~56 k forward calls
+#   ~1240 NEFF compiles on first run.
+#   Wall clock: ~3-6 h on first run, minutes on rerun (cache hit).
 #
 # Profiling cost vs. LENS (NxDI bucket profiling): ~100x more NEFFs
 # (LENS profiles 14 buckets; this sweep emits ~1300 distinct shapes).
@@ -72,7 +79,7 @@ MODEL_TPS=(
 # Paper grids (extracted from RTXPRO6000/Llama-3.1-8B/bf16/tp1)
 # =============================================================================
 
-# 152 token points
+# 157 token points (paper 152 up to 2048 + sparse extension to 8192)
 TOKENS_GRID="1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,\
 20,24,28,32,36,40,44,48,52,56,60,64,\
 80,96,112,128,144,160,176,192,208,224,240,256,\
@@ -82,21 +89,22 @@ TOKENS_GRID="1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,\
 1040,1056,1072,1088,1104,1120,1136,1152,1168,1184,1200,1216,1232,1248,1264,1280,\
 1296,1312,1328,1344,1360,1376,1392,1408,1424,1440,1456,1472,1488,1504,1520,1536,\
 1552,1568,1584,1600,1616,1632,1648,1664,1680,1696,1712,1728,1744,1760,1776,1792,\
-1808,1824,1840,1856,1872,1888,1904,1920,1936,1952,1968,1984,2000,2016,2032,2048"
+1808,1824,1840,1856,1872,1888,1904,1920,1936,1952,1968,1984,2000,2016,2032,2048,\
+2560,3072,4096,6144,8192"
 
-# 40 sequence points
-SEQUENCES_GRID="1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,\
-20,24,28,32,36,40,44,48,52,56,60,64,\
-80,96,112,128,144,160,176,192,208,224,240,256"
+# 20 sequence points (paper pattern up to max_num_seqs = 32)
+SEQUENCES_GRID="1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,20,24,28,32"
 
-# 19 prefill_chunk points (paper's irregular geometric, excluding 0)
-PREFILL_GRID="16,24,32,36,54,64,81,122,128,182,256,273,410,512,615,923,1024,1384,2048"
+# 24 prefill_chunk points (paper 19 up to 2048 + sparse extension to 8192;
+# attention is O(pc²) so we cannot rely on extrapolation)
+PREFILL_GRID="16,24,32,36,54,64,81,122,128,182,256,273,410,512,615,923,\
+1024,1384,2048,2560,3072,4096,6144,8192"
 
 # kv_prefill always 0 — chunked prefill is excluded from this profile
 KV_PREFILL_GRID="0"
 
-# 9 n_decode points (paper, excluding 0)
-DECODE_N_GRID="1,2,4,8,16,32,64,128,256"
+# 6 n_decode points (capped at max_num_seqs = 32)
+DECODE_N_GRID="1,2,4,8,16,32"
 
 # 17 kv_decode points (paper, capped at MAX_SEQ_LEN; 8192 entry will be
 # auto-skipped by profile_neuron.py since kv_d+1 > max_position_embeddings).
@@ -135,13 +143,13 @@ echo "  max_seq_len  : $MAX_SEQ_LEN"
 echo "  dtype        : $DTYPE"
 echo "  warmup       : $WARMUP   repeat : $REPEAT   reload_every : $RELOAD_EVERY"
 echo
-echo "  grids (LLMServingSim 2.0 paper, RTXPRO6000 reference bundle):"
-echo "    tokens           : $n_tok pts (1..2048, paper irregular)"
-echo "    sequences        : $n_seq pts (1..256)"
-echo "    prefill_chunk    : $n_pc pts (16..2048, paper irregular)"
-echo "    kv_prefill       : $n_kvp pt  (0 only — chunked prefill excluded)"
-echo "    n_decode         : $n_nd pts (1..256)"
-echo "    kv_decode        : $n_kvd pts (16..8192)"
+echo "  grids (paper bundle + scenario tweaks for max_num_seqs=32):"
+echo "    tokens           : $n_tok pts (1..8192; paper 152 + 5 ext)"
+echo "    sequences        : $n_seq pts (1..32; capped from paper 256)"
+echo "    prefill_chunk    : $n_pc pts  (16..8192; paper 19 + 5 ext)"
+echo "    kv_prefill       : $n_kvp pt  (0 — chunked prefill excluded)"
+echo "    n_decode         : $n_nd pts  (1..32; capped from paper 256)"
+echo "    kv_decode        : $n_kvd pts (16..8192; paper)"
 echo
 echo "  shots/(model, TP):"
 echo "    Llama / Mistral  = ${shots_llama} (7 dense × ${n_tok} + ${n_perseq} per_seq + ${n_attn_pre} attn_pre + ${n_attn_dec} attn_dec)"
