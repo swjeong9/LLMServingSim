@@ -450,6 +450,10 @@ class _RuntimeState:
         self.reload_every = reload_every
         self.shots = 0
         self.reload_count = 0
+        # Reload wall-time accounting: total across the run, plus a
+        # per-stage marker that callers drain via take_reload_sec().
+        self.reload_sec_total = 0.0
+        self._reload_sec_marker = 0.0
 
     def tick(self) -> bool:
         """Increment shot counter; reload if threshold reached. Returns
@@ -466,9 +470,19 @@ class _RuntimeState:
             self.model, self.cfg, self.device, self.dtype = self.reload_fn()
             self.shots = 0
             self.reload_count += 1
-            print(f"    [reload] reloaded in {time.perf_counter()-t0:.1f}s")
+            elapsed = time.perf_counter() - t0
+            self.reload_sec_total += elapsed
+            self._reload_sec_marker += elapsed
+            print(f"    [reload] reloaded in {elapsed:.1f}s")
             return True
         return False
+
+    def take_reload_sec(self) -> float:
+        """Drain reload-time accumulated since the last call. Use after
+        a sweep stage to attribute reload cost to that stage."""
+        s = self._reload_sec_marker
+        self._reload_sec_marker = 0.0
+        return s
 
 
 # ======================================================================
@@ -868,12 +882,25 @@ def main():
     }
     run_t0 = time.perf_counter()
 
+    def _stage_split(shots):
+        """Split shot wall-time into compile (cold-cache first call) vs.
+        measure (post-compile forward calls)."""
+        comp = sum(s.get("compile_us", 0.0) for s in shots) / 1e6
+        wall = sum(s.get("wall_us",    0.0) for s in shots) / 1e6
+        return comp, max(wall - comp, 0.0)
+
     for tp in tps:
         print(f"\n========== TP={tp} ==========")
         out_tp = out_root / f"tp{tp}"
         out_tp.mkdir(exist_ok=True)
-        stage_t = {"load_sec": 0.0, "dense_sec": 0.0, "per_seq_sec": 0.0,
-                   "attn_sec": 0.0, "write_sec": 0.0, "total_sec": 0.0,
+        stage_t = {"load_sec": 0.0,
+                   "dense_sec": 0.0, "dense_compile_sec": 0.0,
+                   "dense_measure_sec": 0.0, "dense_reload_sec": 0.0,
+                   "per_seq_sec": 0.0, "per_seq_compile_sec": 0.0,
+                   "per_seq_measure_sec": 0.0, "per_seq_reload_sec": 0.0,
+                   "attn_sec": 0.0, "attn_compile_sec": 0.0,
+                   "attn_measure_sec": 0.0, "attn_reload_sec": 0.0,
+                   "write_sec": 0.0, "total_sec": 0.0,
                    "shots": []}
         tp_t0 = time.perf_counter()
 
@@ -907,11 +934,16 @@ def main():
         dense_rows, dense_shots = sweep_dense(state, arch,
                                               tokens_grid, args.warmup, args.repeat)
         stage_t["dense_sec"] = time.perf_counter() - sweep_t0
+        stage_t["dense_reload_sec"] = state.take_reload_sec()
+        stage_t["dense_compile_sec"], stage_t["dense_measure_sec"] = _stage_split(dense_shots)
         write_t0 = time.perf_counter()
         write_dense_csv(dense_rows, out_tp / "dense.csv")
         stage_t["write_sec"] += time.perf_counter() - write_t0
         stage_t["shots"].extend(dense_shots)
-        print(f"  [✓] dense.csv ({len(dense_rows)} rows, {stage_t['dense_sec']:.1f}s)")
+        print(f"  [✓] dense.csv ({len(dense_rows)} rows; wall {stage_t['dense_sec']:.1f}s; "
+              f"compile {stage_t['dense_compile_sec']:.1f}s, "
+              f"measure {stage_t['dense_measure_sec']:.1f}s, "
+              f"reload {stage_t['dense_reload_sec']:.1f}s)")
 
         # --- per_sequence ---
         print("  -- per_sequence sweep --")
@@ -919,11 +951,16 @@ def main():
         ps_rows, ps_shots = sweep_per_sequence(state, arch,
                                                sequences_grid, args.warmup, args.repeat)
         stage_t["per_seq_sec"] = time.perf_counter() - sweep_t0
+        stage_t["per_seq_reload_sec"] = state.take_reload_sec()
+        stage_t["per_seq_compile_sec"], stage_t["per_seq_measure_sec"] = _stage_split(ps_shots)
         write_t0 = time.perf_counter()
         write_per_sequence_csv(ps_rows, out_tp / "per_sequence.csv")
         stage_t["write_sec"] += time.perf_counter() - write_t0
         stage_t["shots"].extend(ps_shots)
-        print(f"  [✓] per_sequence.csv ({len(ps_rows)} rows, {stage_t['per_seq_sec']:.1f}s)")
+        print(f"  [✓] per_sequence.csv ({len(ps_rows)} rows; wall {stage_t['per_seq_sec']:.1f}s; "
+              f"compile {stage_t['per_seq_compile_sec']:.1f}s, "
+              f"measure {stage_t['per_seq_measure_sec']:.1f}s, "
+              f"reload {stage_t['per_seq_reload_sec']:.1f}s)")
 
         # --- attention ---
         if args.skip_attention:
@@ -939,19 +976,68 @@ def main():
                 decode_n_grid, kv_decode_grid,
                 dense_rows, args.warmup, args.repeat)
             stage_t["attn_sec"] = time.perf_counter() - sweep_t0
+            stage_t["attn_reload_sec"] = state.take_reload_sec()
+            stage_t["attn_compile_sec"], stage_t["attn_measure_sec"] = _stage_split(attn_shots)
             write_t0 = time.perf_counter()
             write_attention_csv(attn_rows, out_tp / "attention.csv")
             stage_t["write_sec"] += time.perf_counter() - write_t0
             stage_t["shots"].extend(attn_shots)
-            print(f"  [✓] attention.csv ({len(attn_rows)} rows, {stage_t['attn_sec']:.1f}s)")
+            print(f"  [✓] attention.csv ({len(attn_rows)} rows; wall {stage_t['attn_sec']:.1f}s; "
+                  f"compile {stage_t['attn_compile_sec']:.1f}s, "
+                  f"measure {stage_t['attn_measure_sec']:.1f}s, "
+                  f"reload {stage_t['attn_reload_sec']:.1f}s)")
 
         stage_t["reload_count"] = state.reload_count
+        stage_t["reload_sec_total"] = state.reload_sec_total
         free_model(state.model)
         stage_t["total_sec"] = time.perf_counter() - tp_t0
+
+        # Per-stage breakdown. Each *_sec is the stage's outer wall time;
+        # compile + measure + reload are extracted from per-shot timings;
+        # whatever's left is loop overhead (input build, dispatch, sync,
+        # prints).
+        for stage in ("dense", "per_seq", "attn"):
+            stage_wall = stage_t[f"{stage}_sec"]
+            tracked = (stage_t[f"{stage}_compile_sec"]
+                       + stage_t[f"{stage}_measure_sec"]
+                       + stage_t[f"{stage}_reload_sec"])
+            stage_t[f"{stage}_loop_overhead_sec"] = max(stage_wall - tracked, 0.0)
+
+        compile_total = (stage_t["dense_compile_sec"]
+                         + stage_t["per_seq_compile_sec"]
+                         + stage_t["attn_compile_sec"])
+        measure_total = (stage_t["dense_measure_sec"]
+                         + stage_t["per_seq_measure_sec"]
+                         + stage_t["attn_measure_sec"])
+        reload_total = stage_t["reload_sec_total"]
+        loop_total = (stage_t["dense_loop_overhead_sec"]
+                      + stage_t["per_seq_loop_overhead_sec"]
+                      + stage_t["attn_loop_overhead_sec"])
+
+        # Top-level reconciliation: total = load + (compile + measure +
+        # reload + loop_overhead across stages) + write + unaccounted.
+        accounted = (stage_t["load_sec"]
+                     + compile_total + measure_total
+                     + reload_total + loop_total
+                     + stage_t["write_sec"])
+        unaccounted = max(stage_t["total_sec"] - accounted, 0.0)
+        stage_t["unaccounted_sec"] = unaccounted
+
         timing_run["tp_stages"][str(tp)] = stage_t
-        print(f"  [⏱] tp{tp} total: {stage_t['total_sec']:.1f}s "
-              f"(load {stage_t['load_sec']:.1f}, dense {stage_t['dense_sec']:.1f}, "
-              f"per_seq {stage_t['per_seq_sec']:.1f}, attn {stage_t['attn_sec']:.1f})")
+
+        T = stage_t["total_sec"]
+        def pct(x): return f"({100*x/T:5.1f}%)" if T > 0 else "(  -  )"
+        print(f"\n  [⏱] tp{tp} breakdown — total {T:.1f}s")
+        print(f"        initial load   : {stage_t['load_sec']:8.1f}s   {pct(stage_t['load_sec'])}")
+        print(f"        compile        : {compile_total:8.1f}s   {pct(compile_total)}")
+        print(f"        measure        : {measure_total:8.1f}s   {pct(measure_total)}")
+        print(f"        reload         : {reload_total:8.1f}s   {pct(reload_total)}   "
+              f"({stage_t['reload_count']} reloads)")
+        print(f"        loop overhead  : {loop_total:8.1f}s   {pct(loop_total)}   "
+              f"(input build, dispatch sync, prints)")
+        print(f"        write CSV      : {stage_t['write_sec']:8.1f}s   {pct(stage_t['write_sec'])}")
+        print(f"        unaccounted    : {unaccounted:8.1f}s   {pct(unaccounted)}   "
+              f"(setup, free_model)")
 
     write_meta(out_root, args.hardware, args.model, variant, tps,
                arch, args.dtype, args.max_position_embeddings,

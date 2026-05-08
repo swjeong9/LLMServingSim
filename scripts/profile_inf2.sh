@@ -65,7 +65,31 @@ OUTPUT_ROOT="${OUTPUT_ROOT:-profiler/perf}"
 
 WARMUP="${WARMUP:-10}"
 REPEAT="${REPEAT:-30}"
-RELOAD_EVERY="${RELOAD_EVERY:-30}"      # NEFF count between HBM reloads
+RELOAD_EVERY="${RELOAD_EVERY:-200}"     # NEFF count between HBM reloads
+                                        # (each NEFF ~20-40 MB; HBM is 16 GB/core
+                                        # so 200 NEFFs ≈ 4-8 GB headroom — safe.
+                                        # Lower if Qwen3 14B OOMs at TP<=2.)
+
+# Cold-cache vs. hot-cache measurement.
+#
+# This script does NOT touch the Neuron compile cache. Cache clearing
+# is a destructive operation (hours of compile work can vanish), so it
+# is left to the user to trigger explicitly when they want pure
+# first-time compile cost numbers in profile_timing.json::compile_us.
+#
+# To start from cold (= measure true compile cost across the sweep):
+#
+#     rm -rf /var/tmp/neuron-compile-cache
+#
+# To inspect cache state without clearing:
+#
+#     du -sh /var/tmp/neuron-compile-cache
+#     find /var/tmp/neuron-compile-cache -name "model.neff" | wc -l
+#
+# The script just records the cache directory path in the banner so the
+# user can decide. compile_us is captured per shot regardless — when
+# cache is hot, compile_us reads near-zero (only disk reload).
+NEURON_CACHE_DIR="${NEURON_CACHE_DIR:-/var/tmp/neuron-compile-cache}"
 
 # Three target models. Comment out to skip.
 # Format: "model_id|tp_csv"
@@ -142,6 +166,17 @@ echo "  output_root  : $OUTPUT_ROOT"
 echo "  max_seq_len  : $MAX_SEQ_LEN"
 echo "  dtype        : $DTYPE"
 echo "  warmup       : $WARMUP   repeat : $REPEAT   reload_every : $RELOAD_EVERY"
+echo
+if [[ -d "$NEURON_CACHE_DIR" ]]; then
+    cache_size=$(du -sh "$NEURON_CACHE_DIR" 2>/dev/null | cut -f1 || echo "?")
+    cache_neffs=$(find "$NEURON_CACHE_DIR" -name "model.neff" 2>/dev/null | wc -l | tr -d ' ')
+    echo "  neuron cache : $NEURON_CACHE_DIR  (${cache_size}, ${cache_neffs} neff)"
+    echo "                 hot cache → compile_us in profile_timing.json ≈ disk reload"
+    echo "                 to measure true compile cost, manually clear:"
+    echo "                   rm -rf $NEURON_CACHE_DIR"
+else
+    echo "  neuron cache : $NEURON_CACHE_DIR  (not present; this run starts cold)"
+fi
 echo
 echo "  grids (paper bundle + scenario tweaks for max_num_seqs=32):"
 echo "    tokens           : $n_tok pts (1..8192; paper 152 + 5 ext)"
