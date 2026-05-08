@@ -284,20 +284,21 @@ for spec in "${MODEL_TPS[@]}"; do
         echo
         echo "  ══════════════ $model  TP=$tp  ══════════════"
 
-        # If user set RUN_TAG explicitly, suffix it per stage so the
-        # subprocesses don't overwrite each other's profile_timing.json.
-        # If RUN_TAG is empty, profile_neuron's auto-numbering picks
-        # unique integers per tp folder.
+        # Stage-named auto-numbering: each stage's profile_timing JSON
+        # is named profile_timing_<stage>_<N>.json with N independent
+        # per stage. Re-running just attn_prefill bumps only that
+        # stage's N. If user set RUN_TAG explicitly, prepend it to the
+        # stage name so the explicit tag still applies.
         if [[ -n "$RUN_TAG" ]]; then
-            attn_pre_tag=(--run-tag "${RUN_TAG}_attn_prefill")
-            attn_dec_tag=(--run-tag "${RUN_TAG}_attn_decode")
-            dense_tag_args=(--run-tag "${RUN_TAG}_dense")
-            perseq_tag_args=(--run-tag "${RUN_TAG}_per_seq")
+            stage_pre="${RUN_TAG}_attn_prefill"
+            stage_dec="${RUN_TAG}_attn_decode"
+            stage_dense="${RUN_TAG}_dense"
+            stage_perseq="${RUN_TAG}_per_seq"
         else
-            attn_pre_tag=()
-            attn_dec_tag=()
-            dense_tag_args=()
-            perseq_tag_args=()
+            stage_pre="attn_prefill"
+            stage_dec="attn_decode"
+            stage_dense="dense"
+            stage_perseq="per_seq"
         fi
 
         echo "  >>> [1/4] attention PREFILL only  (TP=$tp, fresh process)"
@@ -306,7 +307,7 @@ for spec in "${MODEL_TPS[@]}"; do
             --skip-dense --skip-per-seq \
             --prefill-grid "$PREFILL_GRID" \
             --decode-n-grid "" --kv-decode-grid "" \
-            "${attn_pre_tag[@]}"
+            --stage "$stage_pre"
 
         echo
         echo "  >>> [2/4] attention DECODE only  (TP=$tp, fresh process)"
@@ -316,7 +317,7 @@ for spec in "${MODEL_TPS[@]}"; do
             --prefill-grid "" \
             --decode-n-grid "$DECODE_N_GRID" \
             --kv-decode-grid "$KV_DECODE_GRID" \
-            "${attn_dec_tag[@]}"
+            --stage "$stage_dec"
 
         echo
         echo "  >>> [3/4] dense sweep  (TP=$tp, fresh process)"
@@ -326,7 +327,7 @@ for spec in "${MODEL_TPS[@]}"; do
             --prefill-grid "$PREFILL_GRID" \
             --decode-n-grid "$DECODE_N_GRID" \
             --kv-decode-grid "$KV_DECODE_GRID" \
-            "${dense_tag_args[@]}"
+            --stage "$stage_dense"
 
         echo
         echo "  >>> [4/4] per_sequence sweep  (TP=$tp, fresh process)"
@@ -336,7 +337,7 @@ for spec in "${MODEL_TPS[@]}"; do
             --prefill-grid "$PREFILL_GRID" \
             --decode-n-grid "$DECODE_N_GRID" \
             --kv-decode-grid "$KV_DECODE_GRID" \
-            "${perseq_tag_args[@]}"
+            --stage "$stage_perseq"
     done
 done
 

@@ -1049,6 +1049,14 @@ def parse_args():
                         "does not yet exist under the variant root, so repeated "
                         "runs (cold cache, hot cache, etc.) never overwrite "
                         "each other. Pass an explicit tag to force a name.")
+    p.add_argument("--stage", default="",
+                   help="Optional stage name (e.g. attn_prefill, attn_decode, "
+                        "dense, per_seq) to embed in the profile_timing file "
+                        "name. When set, the file is written as "
+                        "profile_timing_<stage>_<N>.json with N auto-numbered "
+                        "PER STAGE — repeated runs of the same stage bump that "
+                        "stage's N independently of other stages. If --run-tag "
+                        "is also set, the tag overrides --stage entirely.")
     return p.parse_args()
 
 
@@ -1089,22 +1097,38 @@ def main():
     machine_info = _capture_machine_info()
     runtime_args = _capture_runtime_args(args)
 
-    def _pick_run_tag(folder: Path, override: str) -> str:
-        """Return the explicit run tag if provided, else the smallest
-        non-negative integer N for which profile_timing_<N>.json does
-        not yet exist under ``folder``."""
+    def _pick_run_tag(folder: Path, override: str, stage: str = "") -> str:
+        """Pick the run-tag suffix for profile_timing_<tag>.json.
+
+        Priority:
+          1. ``override`` (the --run-tag value): used as-is, no numbering.
+          2. ``stage`` (the --stage value): file becomes
+             profile_timing_<stage>_<N>.json with N auto-numbered per
+             stage. Re-running attn_prefill bumps only that stage's N,
+             not dense's or per_seq's.
+          3. Neither: file is profile_timing_<N>.json with N auto-numbered
+             across all profile_timing files in the folder.
+        """
         if override:
             return override
         import re as _re
+        if stage:
+            pat = _re.compile(rf"profile_timing_{_re.escape(stage)}_(\d+)\.json$")
+            prefix = f"{stage}_"
+            glob_pat = f"profile_timing_{stage}_*.json"
+        else:
+            pat = _re.compile(r"profile_timing_(\d+)\.json$")
+            prefix = ""
+            glob_pat = "profile_timing_*.json"
         used = set()
-        for f in folder.glob("profile_timing_*.json"):
-            m = _re.match(r"profile_timing_(\d+)\.json$", f.name)
+        for f in folder.glob(glob_pat):
+            m = pat.match(f.name)
             if m:
                 used.add(int(m.group(1)))
         n = 0
         while n in used:
             n += 1
-        return str(n)
+        return f"{prefix}{n}"
 
     def _stage_split(shots):
         """Split shot wall-time into compile (cold-cache first call) vs.
@@ -1284,7 +1308,7 @@ def main():
         # to this tp<N>/ folder so each TP runs independently — partial
         # progress survives Ctrl-C, and per-TP bundles are self-contained
         # for sharing.
-        per_tp_tag = _pick_run_tag(out_tp, args.run_tag)
+        per_tp_tag = _pick_run_tag(out_tp, args.run_tag, args.stage)
         per_tp_timing = {
             "schema": "profile_timing-v1",
             "model": args.model,
