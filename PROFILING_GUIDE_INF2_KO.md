@@ -621,39 +621,165 @@ done
 
 ---
 
-## 6. 본 측정 — 실험 [sim-docker]
+## 6. 본 측정 — Static offline batch baseline
+
+본 가이드 사용자의 시나리오는 **static offline batch**:
+- 동적 도착 (Poisson rate, streaming) **안 함**
+- 특정 batch_size B 에 대해, dataset 에서 B × 50 = 200 요청을 랜덤 sampling
+- 200개 요청을 t=0 에 한꺼번에 enqueue → batch_size=B 로 처리
+- 각 요청의 **execution latency** (= total - queuing_delay) 만 비교
+
+이 시나리오에서 시뮬레이터 ↔ 실측을 일대일 매칭 비교 가능. 단 **continuous batching (A) vs strict static (B)** 두 모드의 차이가 데이터 분포에 따라 의미있게 나타날 수 있어 **둘 다 측정해서 비교** 권장.
+
+### 6.1 모드 정의
+
+| 모드 | 의미 | 시뮬에서 | 실측에서 |
+|---|---|---|---|
+| **A (continuous)** | 한 자리 비면 즉시 채움 | 200개 모두 `arrival_time_ns: 0` + `--max-num-seqs B` | `llm.generate(prompts_200, ...)` 한 번 |
+| **B (strict)** | 4개 모두 끝나야 다음 4개 | batch i 의 arrival 을 `i × 10s` 로 띄움 (시뮬은 fast-forward) | 50번 따로 `llm.generate(batch_4, ...)` 반복 |
+
+### 6.2 4단계 워크플로
+
+도구 3종 (`scripts/make_static_workload.py`, `scripts/measure_static_neuron.py`, `scripts/compare_static.py`).
+
+#### Step 1: workload 생성 — [로컬 또는 inf2]
 
 ```bash
-for cfg in configs/cluster/inf2_*.json; do
-  name=$(basename $cfg .json)
-  python -m serving \
-    --cluster-config "$cfg" \
-    --dtype bfloat16 \
-    --dataset 'workloads/sharegpt-llama-3.1-8b-300-sps10.jsonl' \
-    --output "outputs/${name}_sharegpt.csv" \
-    --num-reqs 100 --max-num-batched-tokens 2048 --max-num-seqs 128 \
-    --log-interval 1.0 \
-    2>&1 | tee "outputs/${name}_sharegpt.log"
+# 모드 A 용 (모든 arrival=0)
+python scripts/make_static_workload.py \
+  --out workloads/static_b4_A.jsonl \
+  --batch-size 4 --num-batches 50 --mode A --seed 42 \
+  uniform --in-lo 256 --in-hi 1024 --out-lo 32 --out-hi 128
+
+# 모드 B 용 (batch i 가 i*10s 에 도착)
+python scripts/make_static_workload.py \
+  --out workloads/static_b4_B.jsonl \
+  --batch-size 4 --num-batches 50 --mode B --gap-seconds 10 --seed 42 \
+  uniform --in-lo 256 --in-hi 1024 --out-lo 32 --out-hi 128
+```
+
+length 모드 3종:
+- `fixed --in-len 512 --out-len 64` — 모든 요청 동일 길이 (분산 0, 디버그/매트릭스 명확)
+- `uniform --in-lo X --in-hi Y --out-lo X --out-hi Y` — 균등 분포
+- `sampled --source workloads/sharegpt-llama-3.1-8b-300-sps10.jsonl` — 실 dataset 의 길이 분포 그대로 sampling
+
+> A 와 B 가 **같은 seed** 면 길이 시퀀스 동일. 도착 시각만 다름. 비교 공정.
+
+#### Step 2: 시뮬레이션 — [sim-docker]
+
+```bash
+docker start -ai servingsim_docker
+cd /app/LLMServingSim
+
+# 모드 A: 모든 도착 t=0, 시뮬은 그냥 max_num_seqs=4 로 처리
+python -m serving \
+  --cluster-config configs/cluster/inf2_llama_3_2_1b_tp4.json \
+  --dtype bfloat16 \
+  --dataset workloads/static_b4_A.jsonl \
+  --output outputs/sim_b4_A.csv \
+  --max-num-seqs 4 --max-num-batched-tokens 8192 \
+  --no-enable-prefix-caching --no-enable-chunked-prefill \
+  --num-reqs 0 --log-interval 1.0
+
+# 모드 B: 도착 분리, 시뮬 동작은 동일 (단 next batch 까지 fast-forward)
+python -m serving \
+  --cluster-config configs/cluster/inf2_llama_3_2_1b_tp4.json \
+  --dtype bfloat16 \
+  --dataset workloads/static_b4_B.jsonl \
+  --output outputs/sim_b4_B.csv \
+  --max-num-seqs 4 --max-num-batched-tokens 8192 \
+  --no-enable-prefix-caching --no-enable-chunked-prefill \
+  --num-reqs 0 --log-interval 1.0
+```
+
+#### Step 3: 실측 — [inf2, vLLM-Neuron venv]
+
+```bash
+source /opt/aws_neuronx_venv_pytorch_inference_vllm_0_16/bin/activate
+pip install -U pandas
+
+# 모드 A
+python scripts/measure_static_neuron.py \
+  --workload workloads/static_b4_A.jsonl \
+  --model meta-llama/Llama-3.2-1B \
+  --tp 4 --batch-size 4 --mode A \
+  --output outputs/meas_b4_A.csv
+
+# 모드 B
+python scripts/measure_static_neuron.py \
+  --workload workloads/static_b4_B.jsonl \
+  --model meta-llama/Llama-3.2-1B \
+  --tp 4 --batch-size 4 --mode B \
+  --output outputs/meas_b4_B.csv
+```
+
+> NEFF 컴파일 캐시 잡히려면 첫 실행에서 동일 (input_len, output_len) 조합마다 한 번씩 compile. uniform 분포면 compile 비용 큼 → fixed 또는 적은 quantization bucket 으로 시작 권장. `--no-shape-warmup` 으로 명시적 warmup 끄기 가능 (timed run 에 컴파일 비용 섞임).
+
+#### Step 4: 비교 — [로컬 또는 inf2]
+
+```bash
+python scripts/compare_static.py \
+  --pair "sim_A=outputs/sim_b4_A.csv,meas_A=outputs/meas_b4_A.csv" \
+  --pair "sim_B=outputs/sim_b4_B.csv,meas_B=outputs/meas_b4_B.csv" \
+  --output-dir outputs/compare_b4
+```
+
+출력:
+```
+outputs/compare_b4/
+├── per_request_A.csv       # request 단위: sim, meas, abs_err, pct_err 
+├── per_request_B.csv
+├── summary.txt              # 분포 통계 (median, p50/p90/p99, |pct err|)
+└── scatter_exec_latency.png # measured vs predicted 산점도
+```
+
+`summary.txt` 예시:
+```
+=== A ===
+  TTFT - queuing_delay (µs)
+    measured  p50=  41832.5  p90=  72341.0  p99=  84120.5
+    predicted p50=  43215.7  p90=  74012.3
+    |pct err| median=  3.31%  p90=  6.47%   (signed median  +3.31%)
+  latency - queuing_delay (µs)
+    measured  p50= 132541.0  p90= 318420.0  p99= 412300.0
+    predicted p50= 135982.4  p90= 322714.5
+    |pct err| median=  2.62%  p90=  4.18%   (signed median  +2.62%)
+  TPOT (µs)
+    ...
+
+=== B ===
+  ...
+```
+
+### 6.3 차이 해석 가이드
+
+`A` 와 `B` 가 **얼마나 다르게 나오나** 자체가 정보:
+
+| 관찰 | 의미 | 결론 |
+|---|---|---|
+| sim_A 와 meas_A 가 ±5% 이내, sim_B 와 meas_B 도 ±5% 이내 | 시뮬레이터가 두 스케줄링 모드 모두 잘 모델링 | 어느 쪽이든 baseline OK. **production 모드 (보통 A)** 로 결정. |
+| sim_A↔meas_A 잘 맞음, sim_B↔meas_B 안 맞음 | 시뮬레이터가 strict batching 의 idle gap 을 정확히 안 잡음 | A 모드만 baseline 으로 사용. B 는 노이즈로 취급. |
+| 양쪽 다 ±20% 이상 어긋남 | profile CSV (per-op 데이터) 자체가 부정확 | profile_neuron.py grid 더 촘촘히 다시. validate_eager.py 의 calibration 적용 고려. |
+| meas_A vs meas_B 자체가 거의 같음 | 데이터 길이 분산이 작아 두 모드가 사실상 동등 | 둘 중 단순한 A 로만 진행. |
+| meas_A 가 meas_B 보다 30% 이상 빠름 | 데이터 길이 heterogeneous → continuous batching 이득 큼 | A/B 둘 다 보존 가치 있음. |
+
+### 6.4 batch size sweep
+
+batch_size 별 실험을 하려면 위 4단계를 B ∈ {1, 2, 4, 8, 16} 등으로 반복:
+
+```bash
+for B in 1 2 4 8 16; do
+  for MODE in A B; do
+    python scripts/make_static_workload.py \
+      --out workloads/static_b${B}_${MODE}.jsonl \
+      --batch-size $B --num-batches 50 --mode $MODE --seed 42 \
+      uniform --in-lo 256 --in-hi 1024 --out-lo 32 --out-hi 128
+    # 시뮬과 실측은 위와 동일, --batch-size $B 로
+  done
 done
 ```
 
-분석 (Python):
-```python
-import pandas as pd, glob
-frames = []
-for path in glob.glob("outputs/inf2_*_sharegpt.csv"):
-    name = path.split("/")[-1].replace("_sharegpt.csv","")
-    df = pd.read_csv(path); df["scenario"] = name
-    frames.append(df)
-big = pd.concat(frames, ignore_index=True)
-print(big.groupby("scenario").agg(
-    n=("request id","count"),
-    p50_TTFT_ms=("TTFT", lambda x: x.quantile(0.5)/1e6),
-    p99_TTFT_ms=("TTFT", lambda x: x.quantile(0.99)/1e6),
-    p50_TPOT_ms=("TPOT", lambda x: x.quantile(0.5)/1e6),
-    e2e_p50_s=("latency", lambda x: x.quantile(0.5)/1e9),
-).round(2))
-```
+batch_size=1 은 single inference 시나리오. heterogeneous workload 에선 batch_size 늘릴수록 throughput ↑ 하지만 per-request latency ↑ 트레이드오프 보임.
 
 ---
 
@@ -802,30 +928,40 @@ python3 scripts/synth_perf_bundle.py \
 
 ## 8. 작업 체크리스트 (인쇄용)
 
+**셋업 + 프로파일** (한 번):
 - [ ] **§1.2** 모델 config 3종 받기 (HF Hub)
 - [ ] **§1.3** model_type 확인
 - [ ] **§1.4** `profiler/models/mistral.yaml` 신규 작성
-- [ ] **§1.5** inf2 인스턴스 결정 (sweep + 검증 모두 inf2.xlarge 한 대로 충분)
-- [ ] **§2.1, 2.2** inf2 부팅, neuronx 가상환경 + transformers 설치
-- [ ] **§2.3** 리포 sync 또는 clone, HF 모델 다운로드 (선택, 검증/본 측정용)
-- [ ] **§3.3** `profile_neuron.py` 로 모델 3개 sweep (15~30분/모델, 첫 컴파일 포함 1~2시간)
+- [ ] **§1.5** inf2 인스턴스 결정 (프로파일은 inf2.xlarge 충분, 실측은 TP 따라 결정)
+- [ ] **§2.1, 2.2** inf2 부팅, `pytorch_2_9` venv (프로파일/검증), `pytorch_inference_vllm_0_16` venv (실측)
+- [ ] **§2.3** 리포 clone, HF 모델 다운로드 (실측에서만 필요)
+- [ ] **§3.3** `profile_neuron.py` 로 모델 3개 sweep
 - [ ] **§3.4** 결과 트리 확인
-- [ ] **§4.3** `validate_eager.py` 로 모델 3개 검증·보정 (10~30분/모델). 또는 §4.6 처럼 skip 결정.
+- [ ] **§4.3** `validate_eager.py` 로 모델 3개 검증·보정 — **선택**, 사용자 시나리오에선 §6 비교가 더 의미있음 (§4.6 참고)
 - [ ] **§5.1** cluster config 11개 일괄 생성
 - [ ] **§5.2** sanity 시뮬레이션 11개 통과
-- [ ] **§6** 본 워크로드로 시뮬, 결과 분석
-- [ ] (선택) **§7** roofline 합성으로 cross-check
+
+**Static offline batch baseline** (모델 × batch_size 조합당):
+- [ ] **§6.2 Step 1** workload JSONL 생성 (mode A 와 mode B 각각)
+- [ ] **§6.2 Step 2** 시뮬 실행 — sim_A.csv, sim_B.csv
+- [ ] **§6.2 Step 3** vLLM-Neuron 실측 — meas_A.csv, meas_B.csv
+- [ ] **§6.2 Step 4** `compare_static.py` 로 4-way 비교
+- [ ] **§6.3** A/B 차이 해석, 어느 모드를 baseline 으로 채택할지 결정
+
+**선택 사항**:
+- [ ] **§7** roofline 합성으로 cross-check (inf2 못 쓸 때 백업)
 
 ---
 
 ## 9. 빠른 참조 — 명령어 모음
 
 ```bash
-# [inf2] eager sweep (모델당 한 번)
+# ─── 프로파일 단계 (한 번) ───────────────────────────────────────────
+# [inf2 / pytorch_2_9 venv] eager sweep
 python scripts/profile_neuron.py \
   --model meta-llama/Llama-3.2-1B --tp 1,2,4,8 --output-root profiler/perf
 
-# [inf2] eager 검증 (모델당 한 번; skip 가능)
+# [inf2 / pytorch_2_9 venv] (선택) eager 검증
 python scripts/validate_eager.py \
   --model meta-llama/Llama-3.2-1B \
   --variant-root profiler/perf/Inferentia2/meta-llama/Llama-3.2-1B/bf16 \
@@ -835,11 +971,39 @@ python scripts/validate_eager.py \
 python3 scripts/synth_perf_bundle.py \
   --model meta-llama/Llama-3.2-1B --tp-list 1,2,4,8 --repo-root .
 
-# [sim-docker] sanity 시뮬레이션
-python -m serving \
-  --cluster-config configs/cluster/inf2_llama_3_2_1b_tp1.json \
-  --dtype bfloat16 --dataset workloads/example_trace.jsonl \
-  --output outputs/sanity.csv --num-reqs 5
+# ─── Static offline batch baseline (모델·batch_size 조합당) ──────────
+# Step 1: workload (모드 A, B 각각)
+for MODE in A B; do
+  python scripts/make_static_workload.py \
+    --out workloads/static_b4_${MODE}.jsonl \
+    --batch-size 4 --num-batches 50 --mode ${MODE} --seed 42 \
+    uniform --in-lo 256 --in-hi 1024 --out-lo 32 --out-hi 128
+done
+
+# Step 2: 시뮬 [sim-docker]
+for MODE in A B; do
+  python -m serving \
+    --cluster-config configs/cluster/inf2_llama_3_2_1b_tp4.json \
+    --dtype bfloat16 \
+    --dataset workloads/static_b4_${MODE}.jsonl \
+    --output outputs/sim_b4_${MODE}.csv \
+    --max-num-seqs 4 --max-num-batched-tokens 8192 \
+    --no-enable-prefix-caching --no-enable-chunked-prefill
+done
+
+# Step 3: 실측 [inf2 / pytorch_inference_vllm_0_16 venv]
+for MODE in A B; do
+  python scripts/measure_static_neuron.py \
+    --workload workloads/static_b4_${MODE}.jsonl \
+    --model meta-llama/Llama-3.2-1B --tp 4 --batch-size 4 --mode ${MODE} \
+    --output outputs/meas_b4_${MODE}.csv
+done
+
+# Step 4: 비교
+python scripts/compare_static.py \
+  --pair "sim_A=outputs/sim_b4_A.csv,meas_A=outputs/meas_b4_A.csv" \
+  --pair "sim_B=outputs/sim_b4_B.csv,meas_B=outputs/meas_b4_B.csv" \
+  --output-dir outputs/compare_b4
 ```
 
 ---
@@ -862,15 +1026,16 @@ python -m serving \
 
 ## 11. 한 줄 요약
 
-1. **eager 프로파일** (`scripts/profile_neuron.py`): transformers + torch_neuronx, NUM_LAYERS=1, hf_overrides 로 TP 분할 흉내, 모듈 직접 호출 + mark_step. 모델당 15~30분.
-2. **eager 검증** (`scripts/validate_eager.py`): NUM_LAYERS=full 모델로 e2e 측정 → CSV 합산 추정과 비교 → 글로벌 스칼라 한 개로 모든 CSV 보정. 모델당 10~30분. **선택 사항** — 베이스라인 비교만 하면 skip 가능.
-3. **roofline 백업** (`scripts/synth_perf_bundle.py`): inf2 막히면 5분 만에 ±25% 정확도 1차 데이터.
-4. 시뮬레이터 호출은 USAGE_GUIDE_KO.md §7 그대로. cluster config 의 `hardware: "Inferentia2"` + `tp_size` 만 바꾸면 됨.
+1. **eager 프로파일** (`scripts/profile_neuron.py`): transformers + torch_neuronx, NUM_LAYERS=1, hf_overrides 로 TP 분할 흉내, 모듈 직접 호출. 모델당 15~30분 + 첫 컴파일.
+2. **eager 검증/보정** (`scripts/validate_eager.py`): **선택**. NUM_LAYERS=full 로 e2e 측정 → CSV 글로벌 스칼라 보정. 사용자 시나리오엔 §6 baseline 비교가 더 직접적이라 skip 가능.
+3. **Static offline baseline** (§6, `make_static_workload.py` + `measure_static_neuron.py` + `compare_static.py`): batch_size 별로 200 요청 sampling → mode A (continuous) / mode B (strict static) 각각 시뮬·실측·비교. **사용자의 진짜 baseline**.
+4. **roofline 백업** (`scripts/synth_perf_bundle.py`): inf2 막히면 5분 만에 ±25% 정확도 1차 데이터.
 
 **핵심 함정**:
 - `profiler/models/mistral.yaml` 직접 작성해야 함
 - TP 가 head 수의 약수가 아니면 sweep 실패 (Qwen3-14B 의 heads=40 은 TP ∈ {1,2,4,5,8,10}; TP=16 안 됨)
-- eager 검증 (§4) 안 거치면 per-layer-합산 bias 때문에 ±20~30% 절대 오차. 상대 비교엔 무관
+- §6 baseline 비교 시 시뮬·실측 양쪽에서 prefix_caching / chunked_prefill / dtype / kv_dtype 정확히 매칭
+- `queuing_delay` 정의를 양쪽 일치 (시뮬: scheduled - arrival; 실측: vLLM `RequestStateStats.scheduled_ts - arrival_time`). 본 도구들은 자동 매칭됨
 
 ---
 
@@ -880,7 +1045,10 @@ python -m serving \
 - `references/ispass26-artifact/llm_profile/perf_models/TPU-v6e-1/llm_profiler_tpu.ipynb` — 논문이 실제로 쓴 TPU profiler 노트북. profile_neuron.py 의 원본.
 - `references/README.md` — v0/v1 schema 차이
 - `scripts/profile_neuron.py` — 본 가이드 §3 의 도구 (논문 cell 4·9 이식)
-- `scripts/validate_eager.py` — 본 가이드 §4 의 도구 (논문 cell 5·6·11 이식)
+- `scripts/validate_eager.py` — 본 가이드 §4 의 도구 (논문 cell 5·6·11 이식); 선택
+- `scripts/make_static_workload.py` — 본 가이드 §6.2 Step 1 (workload 생성, mode A/B)
+- `scripts/measure_static_neuron.py` — 본 가이드 §6.2 Step 3 (vLLM-Neuron 실측)
+- `scripts/compare_static.py` — 본 가이드 §6.2 Step 4 (시뮬 vs 실측 비교)
 - `scripts/synth_perf_bundle.py` — 본 가이드 §7 의 roofline 백업 (인라인)
 - `USAGE_GUIDE_KO.md` — 시뮬레이터 사용 전반
 - `docs/docs/profiler/adding-hardware.md` — non-GPU 하드웨어 추가 공식 가이드 (영문)
