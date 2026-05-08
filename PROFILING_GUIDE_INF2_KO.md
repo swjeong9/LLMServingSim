@@ -270,10 +270,19 @@ DLAMI 의 Neuron 가상환경 활성화 + 추가 패키지:
 ```bash
 # (1) 정확한 venv 경로 확인 — DLAMI 버전 / Neuron SDK 버전마다 다름
 ls /opt/ | grep -i neuron
-# 예시: aws_neuronx_venv_pytorch_2_5  /  aws_neuronx_venv_pytorch_2_6  ...
+# 예시 (2026-05 시점 DLAMI):
+#   aws_neuronx_venv_jax_0_7
+#   aws_neuronx_venv_pytorch_2_9                     ← 본 가이드용 (vanilla PyTorch + Neuron eager)
+#   aws_neuronx_venv_pytorch_2_9_nxd_inference       (NxDI 포함; 본 가이드 미사용)
+#   aws_neuronx_venv_pytorch_2_9_nxd_training        (NxD training 용)
+#   aws_neuronx_venv_pytorch_inference_vllm_0_16     (vLLM-Neuron 통합; 본 가이드 미사용)
+#
+# 어느 걸 골라야 하나:
+# - profile_neuron.py + validate_eager.py 만 돌릴 거면 → pytorch_2_9 (가장 깨끗)
+# - production NxDI 도 같이 쓸 거면 → pytorch_2_9_nxd_inference (둘 다 됨)
 
 # (2) 활성화 (위에서 본 실제 이름으로)
-source /opt/aws_neuronx_venv_pytorch_2_5/bin/activate
+source /opt/aws_neuronx_venv_pytorch_2_9/bin/activate
 
 # (3) 본 가이드용 추가 패키지 — DLAMI 에 이미 있을 가능성 높지만 멱등
 pip install -U transformers accelerate sentencepiece pyyaml
@@ -370,7 +379,7 @@ huggingface-cli download Qwen/Qwen3-14B            --local-dir ~/models/Qwen3-14
 
 ```bash
 cd ~/LLMServingSim
-source /opt/aws_neuronx_venv_pytorch_2_5/bin/activate
+source /opt/aws_neuronx_venv_pytorch_2_9/bin/activate
 export HF_TOKEN="hf_xxx_your_token_here"
 
 # Llama 3.2 1B (TP=1,2,4,8)
@@ -482,7 +491,7 @@ tar xzf /tmp/inf2-perf.tgz -C /Users/swjeong/Desktop/LLMServingSim/
 
 ```bash
 cd ~/LLMServingSim
-source /opt/aws_neuronx_venv_pytorch_2_5/bin/activate
+source /opt/aws_neuronx_venv_pytorch_2_9/bin/activate
 export HF_TOKEN="hf_xxx_your_token_here"
 
 # Llama 3.2 1B (full=16 layers, 단일 코어 OK)
