@@ -427,13 +427,60 @@ def free_model(model):
         pass
 
 
+class _RuntimeState:
+    """Mutable holder for (model, cfg, dtype, device) so sweep functions
+    can replace them on-the-fly via reload() without breaking caller refs.
+
+    Periodic reload is needed because Neuron's runtime keeps every
+    compiled NEFF resident in NeuronCore HBM until the model object is
+    freed. With ~hundreds of unique input shapes during a sweep, HBM
+    fills up (~5-10 GB per 100 shapes) and subsequent compiles fail with
+        Failed to allocate ... (alignment: ..., usage: model constants)
+    Free + reload drops the resident NEFFs but keeps the disk-side
+    compile cache, so re-encountering a shape is ~immediate.
+    """
+
+    def __init__(self, model, cfg, dtype, device,
+                 reload_fn=None, reload_every=0):
+        self.model = model
+        self.cfg = cfg
+        self.dtype = dtype
+        self.device = device
+        self.reload_fn = reload_fn
+        self.reload_every = reload_every
+        self.shots = 0
+        self.reload_count = 0
+
+    def tick(self) -> bool:
+        """Increment shot counter; reload if threshold reached. Returns
+        True when a reload happened so callers can re-fetch module
+        references against the new model."""
+        self.shots += 1
+        if (self.reload_every > 0
+                and self.shots >= self.reload_every
+                and self.reload_fn is not None):
+            t0 = time.perf_counter()
+            print(f"    [reload] freeing model after {self.shots} shots "
+                  f"to reset Neuron HBM...")
+            free_model(self.model)
+            self.model, self.cfg, self.device, self.dtype = self.reload_fn()
+            self.shots = 0
+            self.reload_count += 1
+            print(f"    [reload] reloaded in {time.perf_counter()-t0:.1f}s")
+            return True
+        return False
+
+
 # ======================================================================
 # Sweeps
 # ======================================================================
-def sweep_dense(model, cfg, dtype, device, arch: str,
+def sweep_dense(state: "_RuntimeState", arch: str,
                 tokens_grid: Sequence[int], warmup: int, repeat: int
                 ) -> Tuple[List[Tuple[str, int, float]], List[Dict[str, Any]]]:
     """Time each catalog dense layer at each token count.
+
+    Uses ``state`` (mutable holder of model/cfg/dtype/device) so periodic
+    reloads can free Neuron HBM mid-sweep without breaking caller refs.
 
     Returns (rows, shot_timings).
       rows: list of (layer_name, tokens, time_us)  ← simulator-facing
@@ -442,9 +489,9 @@ def sweep_dense(model, cfg, dtype, device, arch: str,
     rows: List[Tuple[str, int, float]] = []
     shot_timings: List[Dict[str, Any]] = []
     for layer_name, paths, kind in ARCH_DESC[arch]["dense_layers"]:
-        modules = [get_module(model, p) for p in paths]
+        modules = [get_module(state.model, p) for p in paths]
         for n in tokens_grid:
-            x = build_dummy_input(kind, n, cfg, dtype, device)
+            x = build_dummy_input(kind, n, state.cfg, state.dtype, state.device)
 
             def call(mods=modules, x=x):
                 # Sum the outputs to keep them live until mark_step.
@@ -466,6 +513,12 @@ def sweep_dense(model, cfg, dtype, device, arch: str,
             print(f"    dense  {layer_name:18s} tokens={n:5d}  -> {t_us:9.3f} us  "
                   f"(compile~{meta['compile_us']/1000:6.1f}ms, wall {meta['wall_us']/1e6:6.2f}s)")
 
+            # Periodic reload to release accumulated Neuron HBM. After
+            # reload, model identity changes — re-fetch module references
+            # against the fresh model.
+            if state.tick():
+                modules = [get_module(state.model, p) for p in paths]
+
     # Synthesize rotary_emb and act_fn (not directly times-able as standalone
     # modules without HF-version-specific glue).
     for n in tokens_grid:
@@ -476,17 +529,17 @@ def sweep_dense(model, cfg, dtype, device, arch: str,
     return rows, shot_timings
 
 
-def sweep_per_sequence(model, cfg, dtype, device, arch: str,
+def sweep_per_sequence(state: "_RuntimeState", arch: str,
                        sequences_grid: Sequence[int], warmup: int, repeat: int
                        ) -> Tuple[List[Tuple[str, int, float]], List[Dict[str, Any]]]:
     """Time lm_head at each sequence count; synthesize sampler row."""
     rows: List[Tuple[str, int, float]] = []
     shot_timings: List[Dict[str, Any]] = []
     for layer_name, paths, kind in ARCH_DESC[arch]["per_seq_layers"]:
-        modules = [get_module(model, p) for p in paths]
+        modules = [get_module(state.model, p) for p in paths]
         for s in sequences_grid:
-            x = build_dummy_input(kind, n=1, cfg=cfg, dtype=dtype,
-                                  device=device, batch=s)
+            x = build_dummy_input(kind, n=1, cfg=state.cfg, dtype=state.dtype,
+                                  device=state.device, batch=s)
 
             def call(mods=modules, x=x):
                 return [m(x) for m in mods]
@@ -506,6 +559,9 @@ def sweep_per_sequence(model, cfg, dtype, device, arch: str,
             print(f"    per_s  {layer_name:18s} seqs={s:5d}    -> {t_us:9.3f} us  "
                   f"(compile~{meta['compile_us']/1000:6.1f}ms, wall {meta['wall_us']/1e6:6.2f}s)")
 
+            if state.tick():
+                modules = [get_module(state.model, p) for p in paths]
+
     for s in sequences_grid:
         rows.append(("sampler", s, SAMPLER_BASE_US + SAMPLER_PER_SEQ_US * s))
 
@@ -522,7 +578,7 @@ def sweep_per_sequence(model, cfg, dtype, device, arch: str,
 # to the V/K being treated as length-1 in the compiled graph). The
 # simulator's attention.csv expects kernel-only timing anyway (qkv_proj
 # / o_proj are timed separately and live in dense.csv).
-def sweep_attention(model, cfg, dtype, device, arch: str,
+def sweep_attention(state: "_RuntimeState", arch: str,
                     prefill_grid: Sequence[int],
                     kv_prefill_grid: Sequence[int],
                     decode_n_grid: Sequence[int],
@@ -537,9 +593,6 @@ def sweep_attention(model, cfg, dtype, device, arch: str,
             scaled_dot_product_attention kernel time, ready for the simulator's
             attention.csv lookup.
       shot_timings: per-shot timing dicts for profile_timing.json.
-
-    ``dense_rows`` is no longer needed for subtraction (kept for backward-compat
-    but unused).
     """
     del dense_rows  # no longer used; kernel time is measured directly
 
@@ -547,33 +600,32 @@ def sweep_attention(model, cfg, dtype, device, arch: str,
     torch = rt["torch"]
     F = torch.nn.functional
 
-    H = cfg.hidden_size
-    nh = cfg.num_attention_heads
-    nkv = cfg.num_key_value_heads
-    head_dim = cfg.head_dim   # set explicitly by shard_config()
+    # Cached config dims — these are stable across reloads (same TP
+    # shard, same dtype) so we can capture once.
+    nh = state.cfg.num_attention_heads
+    nkv = state.cfg.num_key_value_heads
+    head_dim = state.cfg.head_dim   # set explicitly by shard_config()
     n_rep = max(nh // max(nkv, 1), 1)
 
     def _build_qkv(B: int, q_len: int, k_len: int):
-        """Build (q, k, v) tensors with the right shapes. K/V are
-        repeat_interleave'd to match Q's head count (mirrors GQA expansion
-        that happens inside HF attention before SDPA)."""
-        q = torch.zeros((B, nh, q_len, head_dim), dtype=dtype, device=device)
-        k = torch.zeros((B, nkv, k_len, head_dim), dtype=dtype, device=device)
-        v = torch.zeros((B, nkv, k_len, head_dim), dtype=dtype, device=device)
+        q = torch.zeros((B, nh, q_len, head_dim),
+                        dtype=state.dtype, device=state.device)
+        k = torch.zeros((B, nkv, k_len, head_dim),
+                        dtype=state.dtype, device=state.device)
+        v = torch.zeros((B, nkv, k_len, head_dim),
+                        dtype=state.dtype, device=state.device)
         if n_rep > 1:
             k = k.repeat_interleave(n_rep, dim=1)
             v = v.repeat_interleave(n_rep, dim=1)
         return q, k, v
 
     def _build_prefill_mask(pc: int, kv_p: int):
-        """Causal mask for prefill: query at relative pos i (absolute kv_p+i)
-        attends to keys at [0, kv_p+i]. Returns float mask of shape
-        (pc, kv_p+pc) with 0 for attend / -inf for blocked."""
         if pc + kv_p == 0:
             return None
-        mask = torch.zeros((pc, kv_p + pc), dtype=dtype, device=device)
-        idx_q = torch.arange(pc, device=device).unsqueeze(1)        # (pc, 1)
-        idx_k = torch.arange(kv_p + pc, device=device).unsqueeze(0)  # (1, kv_p+pc)
+        mask = torch.zeros((pc, kv_p + pc),
+                           dtype=state.dtype, device=state.device)
+        idx_q = torch.arange(pc, device=state.device).unsqueeze(1)
+        idx_k = torch.arange(kv_p + pc, device=state.device).unsqueeze(0)
         blocked = idx_k > (kv_p + idx_q)
         mask = mask.masked_fill(blocked, float("-inf"))
         return mask
@@ -584,7 +636,7 @@ def sweep_attention(model, cfg, dtype, device, arch: str,
     # ---- Pure prefill (pc, kv_p, 0, 0) ----
     for pc in prefill_grid:
         for kv_p in kv_prefill_grid:
-            if pc + kv_p > cfg.max_position_embeddings:
+            if pc + kv_p > state.cfg.max_position_embeddings:
                 continue
             q, k, v = _build_qkv(B=1, q_len=pc, k_len=pc + kv_p)
             attn_mask = _build_prefill_mask(pc, kv_p)
@@ -610,14 +662,13 @@ def sweep_attention(model, cfg, dtype, device, arch: str,
             print(f"    attn   prefill pc={pc:5d} kv_p={kv_p:5d}                 "
                   f"-> {t_kernel:9.3f} us  "
                   f"(compile~{meta['compile_us']/1000:6.1f}ms, wall {meta['wall_us']/1e6:6.2f}s)")
+            state.tick()  # state.cfg/device still valid after reload
 
     # ---- Pure decode (0, 0, n, kv_d) ----
     for n in decode_n_grid:
         for kv_d in kv_decode_grid:
-            if kv_d + 1 > cfg.max_position_embeddings:
+            if kv_d + 1 > state.cfg.max_position_embeddings:
                 continue
-            # Single-token decode attending to full kv_d+1 context (the
-            # +1 captures the new token's own k/v entry).
             q, k, v = _build_qkv(B=n, q_len=1, k_len=kv_d + 1)
 
             def call(q=q, k=k, v=v):
@@ -641,6 +692,7 @@ def sweep_attention(model, cfg, dtype, device, arch: str,
             print(f"    attn   decode                       n={n:4d} kv_d={kv_d:5d}"
                   f" -> {t_kernel:9.3f} us  "
                   f"(compile~{meta['compile_us']/1000:6.1f}ms, wall {meta['wall_us']/1e6:6.2f}s)")
+            state.tick()
 
     rows.sort()
     return rows, shot_timings
@@ -764,6 +816,10 @@ def parse_args():
     # Measurement
     p.add_argument("--warmup", type=int, default=10)
     p.add_argument("--repeat", type=int, default=30)
+    p.add_argument("--reload-every", type=int, default=30,
+                   help="Free + re-load the model after every N timed shots "
+                        "to release accumulated Neuron NEFFs from HBM. "
+                        "0 = never reload (will OOM on large sweeps).")
 
     p.add_argument("--skip-attention", action="store_true",
                    help="Write empty attention.csv (debug; speeds up first run)")
@@ -835,10 +891,20 @@ def main():
               f"heads={cfg.num_attention_heads}, kv={cfg.num_key_value_heads}, "
               f"inter={cfg.intermediate_size}")
 
+        # Build a closure that recreates the model with the same args, so
+        # _RuntimeState can periodically reload to release Neuron HBM.
+        def _reload_for_tp(_tp=tp):
+            return load_model(args.model, _tp, args.dtype,
+                              args.max_position_embeddings, args.hf_token)
+
+        state = _RuntimeState(model, cfg, dtype, device,
+                              reload_fn=_reload_for_tp,
+                              reload_every=args.reload_every)
+
         # --- dense ---
         print("  -- dense sweep --")
         sweep_t0 = time.perf_counter()
-        dense_rows, dense_shots = sweep_dense(model, cfg, dtype, device, arch,
+        dense_rows, dense_shots = sweep_dense(state, arch,
                                               tokens_grid, args.warmup, args.repeat)
         stage_t["dense_sec"] = time.perf_counter() - sweep_t0
         write_t0 = time.perf_counter()
@@ -850,7 +916,7 @@ def main():
         # --- per_sequence ---
         print("  -- per_sequence sweep --")
         sweep_t0 = time.perf_counter()
-        ps_rows, ps_shots = sweep_per_sequence(model, cfg, dtype, device, arch,
+        ps_rows, ps_shots = sweep_per_sequence(state, arch,
                                                sequences_grid, args.warmup, args.repeat)
         stage_t["per_seq_sec"] = time.perf_counter() - sweep_t0
         write_t0 = time.perf_counter()
@@ -868,7 +934,7 @@ def main():
             print("  -- attention sweep --")
             sweep_t0 = time.perf_counter()
             attn_rows, attn_shots = sweep_attention(
-                model, cfg, dtype, device, arch,
+                state, arch,
                 prefill_grid, kv_prefill_grid,
                 decode_n_grid, kv_decode_grid,
                 dense_rows, args.warmup, args.repeat)
@@ -879,7 +945,8 @@ def main():
             stage_t["shots"].extend(attn_shots)
             print(f"  [✓] attention.csv ({len(attn_rows)} rows, {stage_t['attn_sec']:.1f}s)")
 
-        free_model(model)
+        stage_t["reload_count"] = state.reload_count
+        free_model(state.model)
         stage_t["total_sec"] = time.perf_counter() - tp_t0
         timing_run["tp_stages"][str(tp)] = stage_t
         print(f"  [⏱] tp{tp} total: {stage_t['total_sec']:.1f}s "
