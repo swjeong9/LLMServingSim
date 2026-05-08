@@ -580,10 +580,16 @@ def sweep_attention(model, cfg, dtype, device, arch: str,
                 use_cache=False,
             )
         except TypeError:
-            # newer HF wants position_embeddings tuple
-            seq_len = hidden.shape[1] + (
-                past_key_value.get_seq_length(0) if past_key_value else 0)
-            cos = torch.zeros((1, seq_len, head_dim), dtype=hidden.dtype, device=hidden.device)
+            # newer HF (transformers >= 4.45) requires the position_embeddings
+            # tuple. cos/sin must match the *query* sequence length
+            # (= hidden.shape[1]) — NOT the full context length. Rotary is
+            # applied to q/k BEFORE they enter the KV cache, so there's no
+            # broadcast against the past portion. Earlier versions of this
+            # script used pc + kv_p which broke shape compatibility whenever
+            # kv_p > 0.
+            q_seq_len = hidden.shape[1]
+            cos = torch.zeros((1, q_seq_len, head_dim),
+                              dtype=hidden.dtype, device=hidden.device)
             sin = torch.zeros_like(cos)
             return self_attn(
                 hidden_states=hidden,
