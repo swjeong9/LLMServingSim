@@ -437,6 +437,7 @@ cat profiler/perf/Inferentia2/meta-llama/Llama-3.2-1B/bf16/meta.yaml
 profiler/perf/Inferentia2/
 ├── meta-llama/Llama-3.2-1B/bf16/
 │   ├── meta.yaml
+│   ├── profile_timing.json          ← 프로파일링 cost / time 기록 (재사용 가능)
 │   ├── tp1/{dense,per_sequence,attention}.csv
 │   ├── tp2/...
 │   ├── tp4/...
@@ -444,6 +445,85 @@ profiler/perf/Inferentia2/
 ├── mistralai/Mistral-7B-v0.3/bf16/    (동일 구조)
 └── Qwen/Qwen3-14B/bf16/                (tp2/4/8)
 ```
+
+#### profile_timing.json — 프로파일링 cost / time 측정 결과
+
+`profile_neuron.py` 가 끝나면 variant 루트에 `profile_timing.json` 자동 저장. 내용:
+
+```json
+{
+  "schema": "profile_timing-v1",
+  "model": "meta-llama/Llama-3.2-1B",
+  "hardware": "Inferentia2",
+  "variant": "bf16",
+  "started_at": "2026-05-08T...",
+  "ended_at":   "2026-05-08T...",
+  "wall_clock_total_sec": 3000.0,
+  "machine": {
+    "instance_type": "inf2.24xlarge",
+    "python": "3.10.x", "torch": "2.9.0", "torch_xla": "2.9.0",
+    "torch_neuronx": "2.x.0", "transformers": "4.46.0"
+  },
+  "args": { "tp": "1,2,4,8", "dtype": "bfloat16", ... },
+  "tp_stages": {
+    "1": {
+      "load_sec": 12.3,             # 모델 로드 시간
+      "dense_sec": 145.2,           # dense sweep 전체
+      "per_seq_sec": 21.7,          # per_sequence sweep
+      "attn_sec": 423.1,            # attention sweep
+      "write_sec": 0.3,             # CSV 저장
+      "total_sec": 602.6,
+      "shots": [
+        {
+          "category": "dense", "layer": "qkv_proj", "key": {"tokens": 1},
+          "first_call_us": 8200.0,    # 첫 호출 (≈ NEFF compile 시간)
+          "median_us": 12.5,          # 안정된 측정값
+          "compile_us": 8187.5,       # = first - median (보수적 추정)
+          "wall_us": 8650.0,          # 전체 wall (warmup + timed)
+          "n_warmup": 10, "n_timed": 30
+        },
+        ...
+      ]
+    },
+    "2": {...}
+  }
+}
+```
+
+확인은 `scripts/show_profile_timing.py` 로:
+
+```bash
+# 한 모델 stage 표
+python scripts/show_profile_timing.py \
+  profiler/perf/Inferentia2/meta-llama/Llama-3.2-1B/bf16
+
+# 카테고리 별 wall / compile 분리
+python scripts/show_profile_timing.py \
+  profiler/perf/Inferentia2/meta-llama/Llama-3.2-1B/bf16 --by-category
+
+# 모델 3개 비교
+python scripts/show_profile_timing.py \
+  profiler/perf/Inferentia2/meta-llama/Llama-3.2-1B/bf16 \
+  profiler/perf/Inferentia2/mistralai/Mistral-7B-v0.3/bf16 \
+  profiler/perf/Inferentia2/Qwen/Qwen3-14B/bf16
+
+# JSON 으로 내보내서 추가 분석
+python scripts/show_profile_timing.py --json \
+  profiler/perf/Inferentia2/meta-llama/Llama-3.2-1B/bf16 > timing_summary.json
+```
+
+stage 표 예시:
+```
+=== meta-llama/Llama-3.2-1B/bf16 ===
+  TP    load     dense    per_seq   attn      write    total    n_shots  compile%
+  ────────────────────────────────────────────────────────────────────────────
+  1       12.3s    2.4m   21.7s    7.1m    0.3s   10.0m     85     78.1%
+  2       11.8s    2.2m   20.1s    6.8m    0.3s    9.4m     85     76.5%
+  4       11.5s    2.1m   18.9s    6.5m    0.3s    8.9m     85     74.9%
+  8       11.2s    1.9m   17.5s    6.0m    0.3s    8.2m     85     71.2%
+```
+
+`compile%` = compile time / wall time. 70~90% 면 **NEFF 컴파일이 측정 시간의 대부분** — 캐시 워밍업 후 재실행하면 극적으로 빨라짐.
 
 이 단계 끝나면 `meta.yaml::calibration::scaling_factor: 1.0` (raw eager 출력). 다음 §4 에서 eager 검증 + 보정 적용.
 
@@ -548,6 +628,7 @@ python scripts/validate_eager.py \
 - `meta.yaml::calibration` 에 scaling factor + per-shape ratios + timestamp 기록.
 - 재실행 시 자동으로 이전 scaling 을 1/s 로 되돌린 뒤 새 s 로 다시 곱함 (멱등).
 - `--dry-run` 으로 스칼라만 보고 CSV 안 건드리는 것도 가능.
+- 검증 cost / time 도 `validation_timing.json` (variant 루트) 에 기록 → `show_profile_timing.py` 로 확인.
 
 ### 4.6 보정 안 할 권리도 있다
 
@@ -1044,12 +1125,13 @@ python scripts/compare_static.py \
 리포 안의 관련 파일:
 - `references/ispass26-artifact/llm_profile/perf_models/TPU-v6e-1/llm_profiler_tpu.ipynb` — 논문이 실제로 쓴 TPU profiler 노트북. profile_neuron.py 의 원본.
 - `references/README.md` — v0/v1 schema 차이
-- `scripts/profile_neuron.py` — 본 가이드 §3 의 도구 (논문 cell 4·9 이식)
-- `scripts/validate_eager.py` — 본 가이드 §4 의 도구 (논문 cell 5·6·11 이식); 선택
-- `scripts/make_static_workload.py` — 본 가이드 §6.2 Step 1 (workload 생성, mode A/B)
-- `scripts/measure_static_neuron.py` — 본 가이드 §6.2 Step 3 (vLLM-Neuron 실측)
-- `scripts/compare_static.py` — 본 가이드 §6.2 Step 4 (시뮬 vs 실측 비교)
-- `scripts/synth_perf_bundle.py` — 본 가이드 §7 의 roofline 백업 (인라인)
+- `scripts/profile_neuron.py` — §3 의 도구 (논문 cell 4·9 이식). `profile_timing.json` 생성.
+- `scripts/validate_eager.py` — §4 의 도구 (논문 cell 5·6·11 이식); 선택. `validation_timing.json` 생성.
+- `scripts/show_profile_timing.py` — `profile_timing.json` / `validation_timing.json` 뷰어. stage / category / shot 단위 cost 표 + 다중 run 비교.
+- `scripts/make_static_workload.py` — §6.2 Step 1 (workload 생성, mode A/B)
+- `scripts/measure_static_neuron.py` — §6.2 Step 3 (vLLM-Neuron 실측)
+- `scripts/compare_static.py` — §6.2 Step 4 (시뮬 vs 실측 비교)
+- `scripts/synth_perf_bundle.py` — §7 의 roofline 백업 (인라인)
 - `USAGE_GUIDE_KO.md` — 시뮬레이터 사용 전반
 - `docs/docs/profiler/adding-hardware.md` — non-GPU 하드웨어 추가 공식 가이드 (영문)
 

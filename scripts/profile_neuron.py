@@ -237,14 +237,33 @@ def build_dummy_input(kind: str, n: int, cfg, dtype, device, batch: int = 1):
 # ======================================================================
 # Synchronous Neuron-aware timing
 # ======================================================================
-def time_callable(fn: Callable[[], Any], warmup: int, repeat: int) -> float:
-    """Time fn() on Neuron via XLA mark_step + wait. Return median microseconds.
+def time_callable(fn: Callable[[], Any], warmup: int, repeat: int
+                  ) -> Tuple[float, Dict[str, Any]]:
+    """Time fn() on Neuron via XLA mark_step + wait.
+
+    Returns ``(median_microseconds, meta)`` where ``meta`` has:
+
+      * ``first_call_us``  — wall time of the *first* warmup iteration.
+        On Neuron this is dominated by the first-time NEFF compile for
+        this shape (or near-zero if cache hit).
+      * ``median_warmup_us`` — median of warmup[1:] (post-compile),
+        useful as a sanity check vs ``median_us``.
+      * ``median_us``       — median of the timed phase (the value
+        used as the official measurement).
+      * ``n_warmup`` / ``n_timed``
+      * ``wall_us``         — total wall time invested in this shot
+        (warmup + timed). Sums ≈ total profiling cost.
+      * ``compile_us``      — first_call_us - median_us (best-effort
+        compile cost estimate; clamped to >= 0).
 
     fn() must wrap whatever forward call we want to measure. Inputs
     should already live on the Neuron device.
     """
     rt = _lazy_import_runtime()
     xm = rt["xm"]
+
+    warmup_samples: List[float] = []
+    timed_samples: List[float] = []
 
     # Warmup. Mirror the timed phase exactly: each fn() call is bracketed
     # by mark_step + wait_device_ops so the compiled graph in the cache
@@ -254,12 +273,14 @@ def time_callable(fn: Callable[[], Any], warmup: int, repeat: int) -> float:
     for _ in range(warmup):
         xm.mark_step()
         xm.wait_device_ops()
+        t0 = time.perf_counter_ns()
         out = fn()
         xm.mark_step()
         xm.wait_device_ops()
+        t1 = time.perf_counter_ns()
+        warmup_samples.append((t1 - t0) / 1000.0)
         del out
 
-    samples: List[float] = []
     for _ in range(repeat):
         xm.mark_step()
         xm.wait_device_ops()
@@ -268,9 +289,26 @@ def time_callable(fn: Callable[[], Any], warmup: int, repeat: int) -> float:
         xm.mark_step()
         xm.wait_device_ops()
         t1 = time.perf_counter_ns()
-        samples.append((t1 - t0) / 1000.0)  # ns -> us
+        timed_samples.append((t1 - t0) / 1000.0)  # ns -> us
         del out
-    return statistics.median(samples)
+
+    median_us = statistics.median(timed_samples)
+    first_us = warmup_samples[0] if warmup_samples else median_us
+    median_warmup_us = (statistics.median(warmup_samples[1:])
+                        if len(warmup_samples) >= 2 else first_us)
+    wall_us = sum(warmup_samples) + sum(timed_samples)
+    compile_us = max(first_us - median_us, 0.0)
+
+    meta = {
+        "first_call_us":   first_us,
+        "median_warmup_us": median_warmup_us,
+        "median_us":       median_us,
+        "n_warmup":        warmup,
+        "n_timed":         repeat,
+        "wall_us":         wall_us,
+        "compile_us":      compile_us,
+    }
+    return median_us, meta
 
 
 # ======================================================================
@@ -340,12 +378,15 @@ def free_model(model):
 # ======================================================================
 def sweep_dense(model, cfg, dtype, device, arch: str,
                 tokens_grid: Sequence[int], warmup: int, repeat: int
-                ) -> List[Tuple[str, int, float]]:
+                ) -> Tuple[List[Tuple[str, int, float]], List[Dict[str, Any]]]:
     """Time each catalog dense layer at each token count.
 
-    Returns rows of (layer_name, tokens, time_us).
+    Returns (rows, shot_timings).
+      rows: list of (layer_name, tokens, time_us)  ← simulator-facing
+      shot_timings: list of per-shot timing dicts  ← profile_timing.json
     """
     rows: List[Tuple[str, int, float]] = []
+    shot_timings: List[Dict[str, Any]] = []
     for layer_name, paths, kind in ARCH_DESC[arch]["dense_layers"]:
         modules = [get_module(model, p) for p in paths]
         for n in tokens_grid:
@@ -357,12 +398,19 @@ def sweep_dense(model, cfg, dtype, device, arch: str,
                 return outs
 
             try:
-                t_us = time_callable(call, warmup, repeat)
+                t_us, meta = time_callable(call, warmup, repeat)
             except Exception as e:
                 print(f"    [WARN] dense {layer_name} n={n} failed: {e}")
                 continue
             rows.append((layer_name, n, t_us))
-            print(f"    dense  {layer_name:18s} tokens={n:5d}  -> {t_us:9.3f} us")
+            shot_timings.append({
+                "category": "dense",
+                "layer": layer_name,
+                "key": {"tokens": n},
+                **meta,
+            })
+            print(f"    dense  {layer_name:18s} tokens={n:5d}  -> {t_us:9.3f} us  "
+                  f"(compile~{meta['compile_us']/1000:6.1f}ms, wall {meta['wall_us']/1e6:6.2f}s)")
 
     # Synthesize rotary_emb and act_fn (not directly times-able as standalone
     # modules without HF-version-specific glue).
@@ -371,14 +419,15 @@ def sweep_dense(model, cfg, dtype, device, arch: str,
         rows.append(("act_fn",     n, ACT_FN_BASE_US + ACT_FN_PER_TOK_US * n))
 
     rows.sort(key=lambda r: (r[0], r[1]))
-    return rows
+    return rows, shot_timings
 
 
 def sweep_per_sequence(model, cfg, dtype, device, arch: str,
                        sequences_grid: Sequence[int], warmup: int, repeat: int
-                       ) -> List[Tuple[str, int, float]]:
+                       ) -> Tuple[List[Tuple[str, int, float]], List[Dict[str, Any]]]:
     """Time lm_head at each sequence count; synthesize sampler row."""
     rows: List[Tuple[str, int, float]] = []
+    shot_timings: List[Dict[str, Any]] = []
     for layer_name, paths, kind in ARCH_DESC[arch]["per_seq_layers"]:
         modules = [get_module(model, p) for p in paths]
         for s in sequences_grid:
@@ -389,18 +438,25 @@ def sweep_per_sequence(model, cfg, dtype, device, arch: str,
                 return [m(x) for m in mods]
 
             try:
-                t_us = time_callable(call, warmup, repeat)
+                t_us, meta = time_callable(call, warmup, repeat)
             except Exception as e:
                 print(f"    [WARN] per_seq {layer_name} s={s} failed: {e}")
                 continue
             rows.append((layer_name, s, t_us))
-            print(f"    per_s  {layer_name:18s} seqs={s:5d}    -> {t_us:9.3f} us")
+            shot_timings.append({
+                "category": "per_sequence",
+                "layer": layer_name,
+                "key": {"sequences": s},
+                **meta,
+            })
+            print(f"    per_s  {layer_name:18s} seqs={s:5d}    -> {t_us:9.3f} us  "
+                  f"(compile~{meta['compile_us']/1000:6.1f}ms, wall {meta['wall_us']/1e6:6.2f}s)")
 
     for s in sequences_grid:
         rows.append(("sampler", s, SAMPLER_BASE_US + SAMPLER_PER_SEQ_US * s))
 
     rows.sort(key=lambda r: (r[0], r[1]))
-    return rows
+    return rows, shot_timings
 
 
 # Attention: time the full self_attn forward at various (pc, kv_p, n, kv_d).
@@ -454,13 +510,13 @@ def sweep_attention(model, cfg, dtype, device, arch: str,
                     kv_decode_grid: Sequence[int],
                     dense_rows: List[Tuple[str, int, float]],
                     warmup: int, repeat: int,
-                    ) -> List[Tuple[int, int, int, int, float]]:
+                    ) -> Tuple[List[Tuple[int, int, int, int, float]], List[Dict[str, Any]]]:
     """4D-axis attention sweep. Pure prefill and pure decode regimes only.
 
-    Returns rows of (prefill_chunk, kv_prefill, n_decode, kv_decode, time_us).
-    The time_us is the kernel-only residual: full self_attn time minus
-    the (qkv_proj + o_proj) cost looked up from dense_rows at the matching
-    token count.
+    Returns (rows, shot_timings).
+      rows: (prefill_chunk, kv_prefill, n_decode, kv_decode, time_us) — kernel-only
+            (full self_attn − qkv_proj − o_proj) for the simulator
+      shot_timings: per-shot timing dicts for profile_timing.json
     """
     rt = _lazy_import_runtime()
     torch = rt["torch"]
@@ -493,6 +549,7 @@ def sweep_attention(model, cfg, dtype, device, arch: str,
             )
 
     rows: List[Tuple[int, int, int, int, float]] = []
+    shot_timings: List[Dict[str, Any]] = []
 
     # ---- Pure prefill (pc, kv_p, 0, 0) ----
     for pc in prefill_grid:
@@ -507,15 +564,24 @@ def sweep_attention(model, cfg, dtype, device, arch: str,
                 return call_self_attn(h, pi, pkv)
 
             try:
-                t_full = time_callable(call, warmup, repeat)
+                t_full, meta = time_callable(call, warmup, repeat)
             except Exception as e:
                 print(f"    [WARN] attn prefill pc={pc} kv_p={kv_p} failed: {e}")
                 continue
             t_proj = _projection_us_at(dense_rows, pc)
             t_kernel = max(t_full - t_proj, 0.5)
             rows.append((pc, kv_p, 0, 0, t_kernel))
+            shot_timings.append({
+                "category": "attention",
+                "regime": "prefill",
+                "key": {"prefill_chunk": pc, "kv_prefill": kv_p,
+                        "n_decode": 0, "kv_decode": 0},
+                "t_full_us": t_full, "t_proj_us": t_proj, "t_kernel_us": t_kernel,
+                **meta,
+            })
             print(f"    attn   prefill pc={pc:5d} kv_p={kv_p:5d}                 "
-                  f"-> {t_full:9.3f} - {t_proj:7.3f} = {t_kernel:9.3f} us")
+                  f"-> {t_full:9.3f} - {t_proj:7.3f} = {t_kernel:9.3f} us  "
+                  f"(compile~{meta['compile_us']/1000:6.1f}ms, wall {meta['wall_us']/1e6:6.2f}s)")
 
     # ---- Pure decode (0, 0, n, kv_d) ----
     for n in decode_n_grid:
@@ -530,18 +596,27 @@ def sweep_attention(model, cfg, dtype, device, arch: str,
                 return call_self_attn(h, pi, pkv)
 
             try:
-                t_full = time_callable(call, warmup, repeat)
+                t_full, meta = time_callable(call, warmup, repeat)
             except Exception as e:
                 print(f"    [WARN] attn decode n={n} kv_d={kv_d} failed: {e}")
                 continue
             t_proj = _projection_us_at(dense_rows, n)
             t_kernel = max(t_full - t_proj, 0.5)
             rows.append((0, 0, n, kv_d, t_kernel))
+            shot_timings.append({
+                "category": "attention",
+                "regime": "decode",
+                "key": {"prefill_chunk": 0, "kv_prefill": 0,
+                        "n_decode": n, "kv_decode": kv_d},
+                "t_full_us": t_full, "t_proj_us": t_proj, "t_kernel_us": t_kernel,
+                **meta,
+            })
             print(f"    attn   decode                       n={n:4d} kv_d={kv_d:5d}"
-                  f" -> {t_full:9.3f} - {t_proj:7.3f} = {t_kernel:9.3f} us")
+                  f" -> {t_full:9.3f} - {t_proj:7.3f} = {t_kernel:9.3f} us  "
+                  f"(compile~{meta['compile_us']/1000:6.1f}ms, wall {meta['wall_us']/1e6:6.2f}s)")
 
     rows.sort()
-    return rows
+    return rows, shot_timings
 
 
 # ======================================================================
@@ -699,10 +774,27 @@ def main():
           f"heads={cfg0.num_attention_heads}, kv_heads={cfg0.num_key_value_heads}, "
           f"inter={cfg0.intermediate_size}")
 
+    # Profile-time accounting (saved as profile_timing.json at end)
+    timing_run = {
+        "schema": "profile_timing-v1",
+        "model": args.model, "hardware": args.hardware, "variant": variant,
+        "started_at": time.strftime("%Y-%m-%dT%H:%M:%S+00:00", time.gmtime()),
+        "machine": _capture_machine_info(),
+        "args": _capture_runtime_args(args),
+        "tp_stages": {},   # tp → {load_sec, dense_sec, per_seq_sec, attn_sec, write_sec, total_sec, shots: [...]}
+    }
+    run_t0 = time.perf_counter()
+
     for tp in tps:
         print(f"\n========== TP={tp} ==========")
         out_tp = out_root / f"tp{tp}"
         out_tp.mkdir(exist_ok=True)
+        stage_t = {"load_sec": 0.0, "dense_sec": 0.0, "per_seq_sec": 0.0,
+                   "attn_sec": 0.0, "write_sec": 0.0, "total_sec": 0.0,
+                   "shots": []}
+        tp_t0 = time.perf_counter()
+
+        load_t0 = time.perf_counter()
         try:
             model, cfg, device, dtype = load_model(
                 args.model, tp, args.dtype,
@@ -711,23 +803,34 @@ def main():
             traceback.print_exc()
             print(f"[!] tp{tp} model load failed: {e}")
             continue
-        print(f"  loaded model with sharded dims: "
+        stage_t["load_sec"] = time.perf_counter() - load_t0
+        print(f"  loaded model in {stage_t['load_sec']:.1f}s with sharded dims: "
               f"heads={cfg.num_attention_heads}, kv={cfg.num_key_value_heads}, "
               f"inter={cfg.intermediate_size}")
 
         # --- dense ---
         print("  -- dense sweep --")
-        dense_rows = sweep_dense(model, cfg, dtype, device, arch,
-                                 tokens_grid, args.warmup, args.repeat)
+        sweep_t0 = time.perf_counter()
+        dense_rows, dense_shots = sweep_dense(model, cfg, dtype, device, arch,
+                                              tokens_grid, args.warmup, args.repeat)
+        stage_t["dense_sec"] = time.perf_counter() - sweep_t0
+        write_t0 = time.perf_counter()
         write_dense_csv(dense_rows, out_tp / "dense.csv")
-        print(f"  [✓] dense.csv ({len(dense_rows)} rows)")
+        stage_t["write_sec"] += time.perf_counter() - write_t0
+        stage_t["shots"].extend(dense_shots)
+        print(f"  [✓] dense.csv ({len(dense_rows)} rows, {stage_t['dense_sec']:.1f}s)")
 
         # --- per_sequence ---
         print("  -- per_sequence sweep --")
-        ps_rows = sweep_per_sequence(model, cfg, dtype, device, arch,
-                                     sequences_grid, args.warmup, args.repeat)
+        sweep_t0 = time.perf_counter()
+        ps_rows, ps_shots = sweep_per_sequence(model, cfg, dtype, device, arch,
+                                               sequences_grid, args.warmup, args.repeat)
+        stage_t["per_seq_sec"] = time.perf_counter() - sweep_t0
+        write_t0 = time.perf_counter()
         write_per_sequence_csv(ps_rows, out_tp / "per_sequence.csv")
-        print(f"  [✓] per_sequence.csv ({len(ps_rows)} rows)")
+        stage_t["write_sec"] += time.perf_counter() - write_t0
+        stage_t["shots"].extend(ps_shots)
+        print(f"  [✓] per_sequence.csv ({len(ps_rows)} rows, {stage_t['per_seq_sec']:.1f}s)")
 
         # --- attention ---
         if args.skip_attention:
@@ -736,14 +839,25 @@ def main():
             print("  [-] attention.csv (skipped via --skip-attention)")
         else:
             print("  -- attention sweep --")
-            attn_rows = sweep_attention(model, cfg, dtype, device, arch,
-                                        prefill_grid, kv_prefill_grid,
-                                        decode_n_grid, kv_decode_grid,
-                                        dense_rows, args.warmup, args.repeat)
+            sweep_t0 = time.perf_counter()
+            attn_rows, attn_shots = sweep_attention(
+                model, cfg, dtype, device, arch,
+                prefill_grid, kv_prefill_grid,
+                decode_n_grid, kv_decode_grid,
+                dense_rows, args.warmup, args.repeat)
+            stage_t["attn_sec"] = time.perf_counter() - sweep_t0
+            write_t0 = time.perf_counter()
             write_attention_csv(attn_rows, out_tp / "attention.csv")
-            print(f"  [✓] attention.csv ({len(attn_rows)} rows)")
+            stage_t["write_sec"] += time.perf_counter() - write_t0
+            stage_t["shots"].extend(attn_shots)
+            print(f"  [✓] attention.csv ({len(attn_rows)} rows, {stage_t['attn_sec']:.1f}s)")
 
         free_model(model)
+        stage_t["total_sec"] = time.perf_counter() - tp_t0
+        timing_run["tp_stages"][str(tp)] = stage_t
+        print(f"  [⏱] tp{tp} total: {stage_t['total_sec']:.1f}s "
+              f"(load {stage_t['load_sec']:.1f}, dense {stage_t['dense_sec']:.1f}, "
+              f"per_seq {stage_t['per_seq_sec']:.1f}, attn {stage_t['attn_sec']:.1f})")
 
     write_meta(out_root, args.hardware, args.model, variant, tps,
                arch, args.dtype, args.max_position_embeddings,
@@ -752,12 +866,63 @@ def main():
                decode_n_grid, kv_decode_grid,
                args.max_num_batched_tokens, args.max_num_seqs)
     print(f"\n[✓] meta.yaml written")
+
+    # Save timing artifact (re-loadable for comparison via show_profile_timing.py)
+    timing_run["ended_at"] = time.strftime("%Y-%m-%dT%H:%M:%S+00:00", time.gmtime())
+    timing_run["wall_clock_total_sec"] = time.perf_counter() - run_t0
+    timing_path = out_root / "profile_timing.json"
+    import json as _json
+    timing_path.write_text(_json.dumps(timing_run, indent=2, default=str))
+    print(f"[✓] profile_timing.json written ({timing_path}, "
+          f"total {timing_run['wall_clock_total_sec']/60:.1f} min)")
+
     print(f"[✓] Done. Variant root: {out_root}")
-    print()
-    print("Next step: calibrate against NxDI e2e measurements:")
-    print(f"    python scripts/calibrate_with_nxdi.py "
-          f"--model {args.model} --tp {','.join(map(str, tps))} "
-          f"--variant-root {out_root}")
+
+
+def _capture_machine_info() -> Dict[str, Any]:
+    """Best-effort: capture which machine / SDK we're running on."""
+    info: Dict[str, Any] = {}
+    info["timestamp"] = time.strftime("%Y-%m-%dT%H:%M:%S+00:00", time.gmtime())
+    try:
+        import platform
+        info["python"] = platform.python_version()
+        info["platform"] = platform.platform()
+    except Exception:
+        pass
+    # Module versions
+    for mod_name in ("torch", "torch_xla", "torch_neuronx", "transformers"):
+        try:
+            mod = __import__(mod_name)
+            info[mod_name] = getattr(mod, "__version__", "unknown")
+        except Exception:
+            info[mod_name] = "not-installed"
+    # Inferentia 2 instance type
+    try:
+        import subprocess
+        out = subprocess.run(["neuron-ls"], capture_output=True, text=True, timeout=5)
+        for line in out.stdout.splitlines():
+            if "instance-type" in line:
+                info["instance_type"] = line.split(":", 1)[-1].strip()
+                break
+    except Exception:
+        pass
+    return info
+
+
+def _capture_runtime_args(args) -> Dict[str, Any]:
+    """Subset of CLI args worth recording for reproducibility / comparison."""
+    return {
+        "tp": args.tp, "dtype": args.dtype,
+        "tokens_grid": args.tokens_grid,
+        "sequences_grid": args.sequences_grid,
+        "prefill_grid": args.prefill_grid,
+        "kv_prefill_grid": args.kv_prefill_grid,
+        "decode_n_grid": args.decode_n_grid,
+        "kv_decode_grid": args.kv_decode_grid,
+        "warmup": args.warmup, "repeat": args.repeat,
+        "max_position_embeddings": args.max_position_embeddings,
+        "skip_attention": args.skip_attention,
+    }
 
 
 if __name__ == "__main__":

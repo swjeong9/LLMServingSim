@@ -473,6 +473,18 @@ def main():
     per_seq = load_per_seq_csv(tp_dir / "per_sequence.csv")
     attn = load_attention_csv(tp_dir / "attention.csv")
 
+    # Validation-time accounting (saved as validation_timing.json).
+    timing_run = {
+        "schema": "validation_timing-v1",
+        "model": args.model, "variant_root": str(variant_root),
+        "started_at": time.strftime("%Y-%m-%dT%H:%M:%S+00:00", time.gmtime()),
+        "machine": _capture_machine_info(),
+        "shapes": [],   # filled per shape: {key, measured_us, estimated_us, ratio, wall_sec}
+        "stages": {"load_sec": 0.0, "shapes_sec": 0.0, "apply_sec": 0.0,
+                   "total_sec": 0.0},
+    }
+    run_t0 = time.perf_counter()
+
     # ---- Determine arch + num_layers_validate ----
     rt = _lazy_import_runtime()
     cfg0 = rt["AutoConfig"].from_pretrained(args.model,
@@ -488,21 +500,27 @@ def main():
               "Inter-layer bias still captured but absolute estimate slightly "
               "shifted; scaling factor remains valid as long as we use the "
               "same nlv on both sides.")
+    timing_run["num_layers_validated"] = nlv
 
     # ---- Load full model ----
     print(f"[*] loading model with num_hidden_layers={nlv} on Neuron core")
+    load_t0 = time.perf_counter()
     model, cfg, device = load_full_model(args.model, nlv, args.dtype,
                                          args.max_position_embeddings,
                                          args.hf_token)
+    timing_run["stages"]["load_sec"] = time.perf_counter() - load_t0
+    print(f"  loaded in {timing_run['stages']['load_sec']:.1f}s")
 
     # ---- Per-shape: measure + estimate ----
     print(f"[*] validating on {len(shapes)} shape(s)")
     rows: Dict[str, Dict[str, float]] = {}
     ratios: Dict[str, float] = {}
+    shapes_t0 = time.perf_counter()
     for inp_len, out_len in shapes:
         if inp_len + out_len > cfg.max_position_embeddings:
             print(f"  shape {inp_len}:{out_len} exceeds max_position_embeddings; skip")
             continue
+        shape_t0 = time.perf_counter()
         try:
             measured = measure_generation_latency(
                 model, cfg, device, inp_len, out_len,
@@ -510,6 +528,7 @@ def main():
         except Exception as e:
             print(f"  [WARN] measurement {inp_len}:{out_len} failed: {e}")
             continue
+        shape_wall = time.perf_counter() - shape_t0
         estimated = estimate_total_us(inp_len, out_len, nlv, arch,
                                       dense, per_seq, attn)
         ratio = measured / estimated if estimated > 0 else float("nan")
@@ -517,8 +536,15 @@ def main():
         rows[key] = {"measured_us": measured, "estimated_us": estimated,
                      "ratio": ratio}
         ratios[key] = ratio
+        timing_run["shapes"].append({
+            "key": key, "input_len": inp_len, "output_len": out_len,
+            "measured_us": measured, "estimated_us": estimated,
+            "ratio": ratio, "wall_sec": shape_wall,
+        })
         print(f"  {key:>14s}   measured={measured:10.1f} us   "
-              f"estimated={estimated:10.1f} us   ratio={ratio:.4f}")
+              f"estimated={estimated:10.1f} us   ratio={ratio:.4f}   "
+              f"(wall {shape_wall:.1f}s)")
+    timing_run["stages"]["shapes_sec"] = time.perf_counter() - shapes_t0
 
     if not ratios:
         print("[!] no valid shapes; aborting.")
@@ -538,21 +564,58 @@ def main():
                     "per_shape_ratios": ratios}, indent=2))
     print(f"[✓] wrote validation_data.json + validation_fit.json")
 
+    apply_t0 = time.perf_counter()
     if args.dry_run:
         print("[*] --dry-run: not modifying CSVs.")
-        return
+    else:
+        # ---- Apply ----
+        import yaml
+        meta = yaml.safe_load((variant_root / "meta.yaml").read_text()) or {}
+        already = (meta.get("calibration", {}) or {}).get("scaling_factor", 1.0)
+        if abs(already - 1.0) > 1e-6:
+            print(f"[!] CSVs already scaled by {already:.4f}; "
+                  f"undoing first by ×{1.0/already:.4f}, then ×{s:.4f}.")
+            apply_scaling(variant_root, 1.0 / already)
+        apply_scaling(variant_root, s)
+        update_meta(variant_root, s, ratios, nlv, shapes)
+        print(f"[✓] calibration applied")
+    timing_run["stages"]["apply_sec"] = time.perf_counter() - apply_t0
 
-    # ---- Apply ----
-    import yaml
-    meta = yaml.safe_load((variant_root / "meta.yaml").read_text()) or {}
-    already = (meta.get("calibration", {}) or {}).get("scaling_factor", 1.0)
-    if abs(already - 1.0) > 1e-6:
-        print(f"[!] CSVs already scaled by {already:.4f}; "
-              f"undoing first by ×{1.0/already:.4f}, then ×{s:.4f}.")
-        apply_scaling(variant_root, 1.0 / already)
-    apply_scaling(variant_root, s)
-    update_meta(variant_root, s, ratios, nlv, shapes)
-    print(f"[✓] calibration applied")
+    # Save timing artifact
+    timing_run["ended_at"] = time.strftime("%Y-%m-%dT%H:%M:%S+00:00", time.gmtime())
+    timing_run["stages"]["total_sec"] = time.perf_counter() - run_t0
+    timing_run["scaling_factor"] = s
+    timing_path = variant_root / "validation_timing.json"
+    timing_path.write_text(json.dumps(timing_run, indent=2, default=str))
+    print(f"[✓] validation_timing.json written ({timing_path}, "
+          f"total {timing_run['stages']['total_sec']/60:.1f} min)")
+
+
+def _capture_machine_info() -> Dict[str, Any]:
+    info: Dict[str, Any] = {"timestamp": time.strftime("%Y-%m-%dT%H:%M:%S+00:00",
+                                                       time.gmtime())}
+    try:
+        import platform
+        info["python"] = platform.python_version()
+        info["platform"] = platform.platform()
+    except Exception:
+        pass
+    for mod_name in ("torch", "torch_xla", "torch_neuronx", "transformers"):
+        try:
+            mod = __import__(mod_name)
+            info[mod_name] = getattr(mod, "__version__", "unknown")
+        except Exception:
+            info[mod_name] = "not-installed"
+    try:
+        import subprocess
+        out = subprocess.run(["neuron-ls"], capture_output=True, text=True, timeout=5)
+        for line in out.stdout.splitlines():
+            if "instance-type" in line:
+                info["instance_type"] = line.split(":", 1)[-1].strip()
+                break
+    except Exception:
+        pass
+    return info
 
 
 if __name__ == "__main__":
