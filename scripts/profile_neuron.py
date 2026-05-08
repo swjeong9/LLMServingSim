@@ -263,7 +263,24 @@ def get_module(model, dotted: str):
 
 
 def build_dummy_input(kind: str, n: int, cfg, dtype, device, batch: int = 1):
-    """Build a synthetic input tensor for a given input_shape_kind."""
+    """Build a synthetic input tensor for a given input_shape_kind.
+
+    IMPORTANT: tensors are created on CPU and moved to the Neuron device
+    via .to(device). Creating directly on the XLA device (i.e. passing
+    device=device to torch.zeros) makes the tensor a *compile-time
+    constant* in the resulting HLO graph, so neuron-cc bakes its full
+    contents into the NEFF as a literal. For our sweep that means each
+    NEFF embeds a giant zero tensor (a single decode-attention NEFF can
+    embed a 750+ MB zero K/V tensor). The .to(device) form produces a
+    runtime DMA transfer instead, which the compiler treats as a
+    runtime input — NEFF stays small.
+
+    Confirmed by aws-neuron-sdk #1164:
+      torch.zeros(2**31, dtype=fp16, device='xla') + mark_step()
+        → "Neff can only support less than 4GB tensors: constant.1"
+      torch.zeros(2**32, dtype=fp16) + .to('xla') + mark_step()
+        → works, runtime transfer.
+    """
     rt = _lazy_import_runtime()
     torch = rt["torch"]
     H = cfg.hidden_size
@@ -272,15 +289,15 @@ def build_dummy_input(kind: str, n: int, cfg, dtype, device, batch: int = 1):
     inter = cfg.intermediate_size
 
     if kind == "ids":
-        return torch.zeros((batch, n), dtype=torch.long, device=device)
+        return torch.zeros((batch, n), dtype=torch.long).to(device)
     if kind in ("hidden", "qkv_in", "mlp_in", "headhid"):
-        return torch.zeros((batch, n, H), dtype=dtype, device=device)
+        return torch.zeros((batch, n, H), dtype=dtype).to(device)
     if kind == "o_in":
-        return torch.zeros((batch, n, nh * head_dim), dtype=dtype, device=device)
+        return torch.zeros((batch, n, nh * head_dim), dtype=dtype).to(device)
     if kind == "down_in":
-        return torch.zeros((batch, n, inter), dtype=dtype, device=device)
+        return torch.zeros((batch, n, inter), dtype=dtype).to(device)
     if kind == "qknorm":
-        return torch.zeros((batch, nh, n, head_dim), dtype=dtype, device=device)
+        return torch.zeros((batch, nh, n, head_dim), dtype=dtype).to(device)
     raise ValueError(f"Unknown input kind: {kind}")
 
 
@@ -796,12 +813,16 @@ def sweep_attention(state: "_RuntimeState", arch: str,
     n_rep = max(nh // max(nkv, 1), 1)
 
     def _build_qkv(B: int, q_len: int, k_len: int):
-        q = torch.zeros((B, nh, q_len, head_dim),
-                        dtype=state.dtype, device=state.device)
-        k = torch.zeros((B, nkv, k_len, head_dim),
-                        dtype=state.dtype, device=state.device)
-        v = torch.zeros((B, nkv, k_len, head_dim),
-                        dtype=state.dtype, device=state.device)
+        # CPU-create + .to(device) so q/k/v become RUNTIME inputs to the
+        # SDPA NEFF, not compile-time constants. See build_dummy_input
+        # for the underlying issue (aws-neuron-sdk #1164). Without this
+        # change, each attention NEFF embeds the full Q/K/V zero tensors
+        # as literals — for decode at (n=32, kv_d=5832) that's a 765 MB
+        # constant per NEFF, and 5-10 such NEFFs accumulated will OOM
+        # the 16 GB Inf2 HBM mid-sweep.
+        q = torch.zeros((B, nh, q_len, head_dim), dtype=state.dtype).to(state.device)
+        k = torch.zeros((B, nkv, k_len, head_dim), dtype=state.dtype).to(state.device)
+        v = torch.zeros((B, nkv, k_len, head_dim), dtype=state.dtype).to(state.device)
         if n_rep > 1:
             k = k.repeat_interleave(n_rep, dim=1)
             v = v.repeat_interleave(n_rep, dim=1)
@@ -810,10 +831,12 @@ def sweep_attention(state: "_RuntimeState", arch: str,
     def _build_prefill_mask(pc: int, kv_p: int):
         if pc + kv_p == 0:
             return None
-        mask = torch.zeros((pc, kv_p + pc),
-                           dtype=state.dtype, device=state.device)
-        idx_q = torch.arange(pc, device=state.device).unsqueeze(1)
-        idx_k = torch.arange(kv_p + pc, device=state.device).unsqueeze(0)
+        # Same CPU-then-move pattern as _build_qkv to keep the mask out
+        # of NEFF constants. arange is small (KB) so less critical, but
+        # we apply the same rule for consistency.
+        mask = torch.zeros((pc, kv_p + pc), dtype=state.dtype).to(state.device)
+        idx_q = torch.arange(pc).unsqueeze(1).to(state.device)
+        idx_k = torch.arange(kv_p + pc).unsqueeze(0).to(state.device)
         blocked = idx_k > (kv_p + idx_q)
         mask = mask.masked_fill(blocked, float("-inf"))
         return mask
