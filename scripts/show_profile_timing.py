@@ -107,10 +107,13 @@ def summarize_profile(timing: Dict[str, Any]) -> Dict[str, Any]:
         shots = st.get("shots", [])
         wall_us_sum = sum(s.get("wall_us", 0) for s in shots)
         compile_us_sum = sum(s.get("compile_us", 0) for s in shots)
-        # By category
+        # By category and by layer
         by_cat: Dict[str, Dict[str, float]] = {}
+        by_layer: Dict[str, Dict[str, float]] = {}
         for s in shots:
             cat = s.get("category", "?")
+            lay = s.get("layer", s.get("regime", "?"))
+            lay_key = f"{cat}/{lay}"
             d = by_cat.setdefault(cat, {"shots": 0, "wall_us": 0,
                                         "compile_us": 0,
                                         "mean_us_sum": 0,
@@ -120,6 +123,12 @@ def summarize_profile(timing: Dict[str, Any]) -> Dict[str, Any]:
                                         "flops_sum": 0.0,
                                         "bytes_sum": 0.0,
                                         "lat_us_sum": 0.0})
+            ld = by_layer.setdefault(lay_key, {"shots": 0,
+                                               "flops_sum": 0.0,
+                                               "bytes_sum": 0.0,
+                                               "lat_us_sum": 0.0,
+                                               "peak_tflops": 0.0,
+                                               "peak_gbs": 0.0})
             d["shots"] += 1
             d["wall_us"] += s.get("wall_us", 0)
             d["compile_us"] += s.get("compile_us", 0)
@@ -129,6 +138,19 @@ def summarize_profile(timing: Dict[str, Any]) -> Dict[str, Any]:
             d["flops_sum"]   += s.get("flops", 0.0)
             d["bytes_sum"]   += s.get("bytes", 0.0)
             d["lat_us_sum"]  += lat_us
+            ld["shots"]       += 1
+            ld["flops_sum"]   += s.get("flops", 0.0)
+            ld["bytes_sum"]   += s.get("bytes", 0.0)
+            ld["lat_us_sum"]  += lat_us
+            # Peak per-shot eff (the best the hardware achieved on any
+            # single shape in this layer). Compute on-the-fly since older
+            # JSONs may not have eff_tflops/eff_gbs stored.
+            shot_tflops = s.get("eff_tflops",
+                                (s.get("flops", 0) / lat_us / 1e6) if lat_us > 0 else 0)
+            shot_gbs    = s.get("eff_gbs",
+                                (s.get("bytes", 0) / lat_us / 1e3) if lat_us > 0 else 0)
+            if shot_tflops > ld["peak_tflops"]: ld["peak_tflops"] = shot_tflops
+            if shot_gbs    > ld["peak_gbs"]:    ld["peak_gbs"]    = shot_gbs
         # New breakdown fields (compile/measure/reload/loop_overhead per
         # stage) added by recent profile_neuron.py changes; missing in
         # older profile_timing files. Aggregate across stages where
@@ -156,6 +178,7 @@ def summarize_profile(timing: Dict[str, Any]) -> Dict[str, Any]:
             "compile_pct_of_wall": (compile_us_sum / wall_us_sum * 100
                                     if wall_us_sum else 0.0),
             "by_category": by_cat,
+            "by_layer":    by_layer,
             # New breakdown rollups (zero if older format).
             "compile_sec":       compile_sec_total,
             "measure_sec":       measure_sec_total,
@@ -246,6 +269,58 @@ def render_profile_summary(label: str, summary: Dict[str, Any], shots: bool,
                          f"{fmt_dur(s['write_sec'])} "
                          f"{fmt_dur(s['total_sec'])} "
                          f"  {s['reload_count']}")
+
+    # Per-TP roofline summary — always shown when flops/bytes data is present.
+    # eff TFLOPS / GB/s are weighted averages: sum(flops or bytes across all
+    # shots in that group) / sum(latency across same shots). Higher = the
+    # hardware is being utilised better on average; AI = arithmetic intensity.
+    has_roofline = any(
+        any(d.get("flops_sum", 0.0) or d.get("bytes_sum", 0.0)
+            for d in s.get("by_category", {}).values())
+        for s in summary["tp_summary"].values()
+    )
+    if has_roofline:
+        lines.append("")
+        lines.append("  Per-TP roofline (weighted avg over all shots in category):")
+        lines.append("  TP    category       shots   eff TFLOPS   eff BW (GB/s)   AI (flops/B)")
+        lines.append("  ─────────────────────────────────────────────────────────"
+                     "──────────────────")
+        for tp in sorted(summary["tp_summary"].keys(), key=lambda x: int(x)):
+            s = summary["tp_summary"][tp]
+            for cat, d in s.get("by_category", {}).items():
+                if d["shots"] == 0: continue
+                eff_t = (d["flops_sum"] / d["lat_us_sum"] / 1e6
+                         if d["lat_us_sum"] > 0 else 0.0)
+                eff_g = (d["bytes_sum"] / d["lat_us_sum"] / 1e3
+                         if d["lat_us_sum"] > 0 else 0.0)
+                ai    = (d["flops_sum"] / d["bytes_sum"]
+                         if d["bytes_sum"] > 0 else 0.0)
+                lines.append(f"  {tp:<5s} {cat:14s} {d['shots']:4d}   "
+                             f"{eff_t:8.2f}     {eff_g:9.1f}      {ai:10.2f}")
+
+        # Per-layer peak (best single-shot eff): tells you what each kernel
+        # achieves at its sweet-spot shape, vs the weighted avg above which
+        # mixes good and bad shots.
+        if any("by_layer" in s for s in summary["tp_summary"].values()):
+            lines.append("")
+            lines.append("  Per-TP per-layer peak eff (best single-shot in each layer):")
+            lines.append("  TP    layer                       shots   peak TFLOPS   peak GB/s    AI (avg)")
+            lines.append("  ─────────────────────────────────────────────────────────"
+                         "──────────────────")
+            for tp in sorted(summary["tp_summary"].keys(), key=lambda x: int(x)):
+                s = summary["tp_summary"][tp]
+                bl = s.get("by_layer", {})
+                # Stable order: dense layers first, then per_sequence, then attention
+                cat_order = {"dense": 0, "per_sequence": 1, "attention": 2}
+                for lay_key in sorted(bl.keys(),
+                                      key=lambda k: (cat_order.get(k.split("/")[0], 9), k)):
+                    d = bl[lay_key]
+                    if d["shots"] == 0: continue
+                    ai = (d["flops_sum"] / d["bytes_sum"]
+                          if d["bytes_sum"] > 0 else 0.0)
+                    lines.append(f"  {tp:<5s} {lay_key:25s}   {d['shots']:4d}   "
+                                 f"{d['peak_tflops']:8.2f}      "
+                                 f"{d['peak_gbs']:8.1f}    {ai:8.2f}")
 
     if by_category:
         lines.append("")

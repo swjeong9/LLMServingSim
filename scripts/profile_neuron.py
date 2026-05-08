@@ -635,6 +635,20 @@ class _RuntimeState:
         return s
 
 
+def _eff_metrics(flops: float, bts: float, mean_us: float) -> Dict[str, float]:
+    """Compute effective TFLOPS, GB/s, and arithmetic intensity for one shot.
+
+    eff_tflops = flops / latency [TFLOPS, achieved compute throughput]
+    eff_gbs    = bytes / latency [GB/s, achieved memory bandwidth]
+    ai         = flops / bytes   [flops/byte, arithmetic intensity]
+    """
+    return {
+        "eff_tflops": (flops / mean_us / 1e6) if mean_us > 0 else 0.0,
+        "eff_gbs":    (bts   / mean_us / 1e3) if mean_us > 0 else 0.0,
+        "ai":         (flops / bts)            if bts     > 0 else 0.0,
+    }
+
+
 # ======================================================================
 # Sweeps
 # ======================================================================
@@ -676,6 +690,7 @@ def sweep_dense(state: "_RuntimeState", arch: str,
                 "key": {"tokens": n},
                 "flops": flops,
                 "bytes": bts,
+                **_eff_metrics(flops, bts, meta["mean_us"]),
                 **meta,
             })
             print(f"    dense  {layer_name:18s} tokens={n:5d}  -> {t_us:9.3f} us  "
@@ -726,6 +741,7 @@ def sweep_per_sequence(state: "_RuntimeState", arch: str,
                 "key": {"sequences": s},
                 "flops": flops,
                 "bytes": bts,
+                **_eff_metrics(flops, bts, meta["mean_us"]),
                 **meta,
             })
             print(f"    per_s  {layer_name:18s} seqs={s:5d}    -> {t_us:9.3f} us  "
@@ -844,6 +860,7 @@ def sweep_attention(state: "_RuntimeState", arch: str,
                 "key": attn_key,
                 "flops": flops,
                 "bytes": bts,
+                **_eff_metrics(flops, bts, meta["mean_us"]),
                 "t_kernel_us": t_kernel,
                 **meta,
             })
@@ -879,6 +896,7 @@ def sweep_attention(state: "_RuntimeState", arch: str,
                 "key": attn_key,
                 "flops": flops,
                 "bytes": bts,
+                **_eff_metrics(flops, bts, meta["mean_us"]),
                 "t_kernel_us": t_kernel,
                 **meta,
             })
