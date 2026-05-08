@@ -72,11 +72,19 @@ MODEL_TPS=(
 # csv.DictReader(open('LENS/inference_profiling/inf2/profile.csv'))}))"`
 LENS_ILS="64,127,128,129,130,255,256,257,260,511,512,513,520,1023,1024,1025,1030,2047,2048,2049,2050,4100"
 
-# dense.tokens: LENS ils ∪ {32} ∪ {1}.
-#   * LENS ils — every prefill iter visits one of these
+# dense.tokens: LENS ils ∪ {32} ∪ {1, 6144, 8192}.
+#   * LENS ils — every prefill iter at LENS's ctx_batch_size=1 visits one
 #   * 32       — every batched decode iter has 32 dense tokens
 #   * 1        — endpoint anchor for small extrapolation; cheap to add
-TOKENS_GRID="1,32,${LENS_ILS}"
+#   * 6144, 8192 — upper anchors. The simulator's batched-prefill scheduler
+#     can pack multiple short requests into one iter; per-iter token count
+#     reaches up to --max-num-batched-tokens (= 8192 here). Without these
+#     anchors the simulator would extrapolate from the (2050, 4100) tail
+#     for any batched-prefill iter that carries 4100..8192 dense tokens
+#     (typical at LENS combos like (260, *)×32 → 31 reqs × 260 = 8060
+#     packed in a single iter). Adding two upper points keeps interpolation
+#     tight without exploding shot count.
+TOKENS_GRID="1,32,${LENS_ILS},6144,8192"
 
 # per_sequence.sequences: powers of 2 from 1 to 32.
 #   * 1 = lm_head at the end of each prefill iter (one new token)
