@@ -25,17 +25,17 @@
 #   tokens            43 points (paper 152 → 4x step coarsened to 38
 #                                 in [4..2048] + 5 sparse pts to 8192)
 #   sequences         20 points (1..16 step1, 20..32 step4)
-#   prefill_chunk     24 points (paper 19 + 5 sparse to 8192)
+#   prefill_chunk     23 points (paper 19 + 4 sparse to 6144; 8192
+#                                 dropped — its NEFF scratchpad ≈ 8 GB
+#                                 alone caused HBM fragmentation OOM)
 #   kv_prefill         1 point  (0)
 #   n_decode           6 points (1, 2, 4, 8, 16, 32)
-#   kv_decode         16 points (paper, up to 8192; the 8192 entry
-#                                 auto-skips at runtime because
-#                                 kv_d+1 > max_position_embeddings)
+#   kv_decode         15 points (paper sans 0; 8192 dropped for the
+#                                 same scratchpad reason)
 #
 # Per (model, TP):
-#   Llama / Mistral  : 7×43 + 20 + 24 + 96 =  441 shots
-#   Qwen3 14B        : 8×43 + 20 + 24 + 96 =  484 shots
-#   ~440-480 NEFF compiles on first run.
+#   Llama / Mistral  : 7×43 + 20 + 23 + 90 =  434 shots
+#   Qwen3 14B        : 8×43 + 20 + 23 + 90 =  477 shots
 #   Wall clock: ~30-45 min per (model, TP) at ~2 s/shot compile cost.
 #
 # Profiling cost vs. LENS (NxDI bucket profiling): ~100x more NEFFs
@@ -69,10 +69,12 @@ WARMUP="${WARMUP:-10}"
 REPEAT="${REPEAT:-100}"     # raised from 30 — forward latency is microseconds,
                             # so 100 reps × 1 ms ~= 100 ms per shot extra cost
                             # for noticeably tighter mean estimates.
-RELOAD_EVERY="${RELOAD_EVERY:-200}"     # NEFF count between HBM reloads
-                                        # (each NEFF ~20-40 MB; HBM is 16 GB/core
-                                        # so 200 NEFFs ≈ 4-8 GB headroom — safe.
-                                        # Lower if Qwen3 14B OOMs at TP<=2.)
+RELOAD_EVERY="${RELOAD_EVERY:-100}"     # NEFF count between HBM reloads
+                                        # (each NEFF ~20-40 MB; HBM is 16 GB/core.
+                                        # 100 picked after observing fragmentation
+                                        # OOM at 200 even with max_pc=6144 — Neuron
+                                        # CC's per-NEFF scratchpad pre-allocation
+                                        # adds up faster than NEFF body alone.)
 
 # Cold-cache vs. hot-cache measurement.
 #
@@ -126,10 +128,12 @@ TOKENS_GRID="4,8,12,16,32,48,64,\
 # 20 sequence points (paper pattern up to max_num_seqs = 32)
 SEQUENCES_GRID="1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,20,24,28,32"
 
-# 24 prefill_chunk points (paper 19 up to 2048 + sparse extension to 8192;
-# attention is O(pc²) so we cannot rely on extrapolation)
+# 23 prefill_chunk points. Capped at 6144 (was 8192) — attention is
+# O(pc²) and the pc=8192 NEFF allocates ~8 GB Shared Scratchpad alone,
+# which dominates HBM and triggers fragmentation OOM mid-sweep on Inf2.
+# LENS scenarios max input length = 4100, so 6144 has comfortable margin.
 PREFILL_GRID="16,24,32,36,54,64,81,122,128,182,256,273,410,512,615,923,\
-1024,1384,2048,2560,3072,4096,6144,8192"
+1024,1384,2048,2560,3072,4096,6144"
 
 # kv_prefill always 0 — chunked prefill is excluded from this profile
 KV_PREFILL_GRID="0"
@@ -137,9 +141,10 @@ KV_PREFILL_GRID="0"
 # 6 n_decode points (capped at max_num_seqs = 32)
 DECODE_N_GRID="1,2,4,8,16,32"
 
-# 17 kv_decode points (paper, capped at MAX_SEQ_LEN; 8192 entry will be
-# auto-skipped by profile_neuron.py since kv_d+1 > max_position_embeddings).
-KV_DECODE_GRID="16,32,64,128,256,512,768,1024,1152,1728,2048,2592,3888,4096,5832,8192"
+# 15 kv_decode points (paper sans 0; 8192 dropped — was auto-skipped at
+# runtime since kv_d+1 > max_pos=8192, and we now also avoid driving up
+# the scratchpad with a near-max kv length).
+KV_DECODE_GRID="16,32,64,128,256,512,768,1024,1152,1728,2048,2592,3888,4096,5832"
 
 # =============================================================================
 # Execute
