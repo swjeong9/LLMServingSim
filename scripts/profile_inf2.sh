@@ -69,12 +69,17 @@ WARMUP="${WARMUP:-10}"
 REPEAT="${REPEAT:-100}"     # raised from 30 — forward latency is microseconds,
                             # so 100 reps × 1 ms ~= 100 ms per shot extra cost
                             # for noticeably tighter mean estimates.
-RELOAD_EVERY="${RELOAD_EVERY:-100}"     # NEFF count between HBM reloads
-                                        # (each NEFF ~20-40 MB; HBM is 16 GB/core.
-                                        # 100 picked after observing fragmentation
-                                        # OOM at 200 even with max_pc=6144 — Neuron
-                                        # CC's per-NEFF scratchpad pre-allocation
-                                        # adds up faster than NEFF body alone.)
+RELOAD_EVERY="${RELOAD_EVERY:-0}"        # 0 = NEVER reload mid-sweep.
+                                        # Counter-intuitive but: Neuron Runtime
+                                        # doesn't actually release the OLD model's
+                                        # HBM on Python-level del+gc+sync, so a
+                                        # mid-sweep reload ends up DOUBLING Model
+                                        # Constants on-device (old + new = 2x base
+                                        # weights). HBM dumps confirmed this. With
+                                        # subprocess splitting per (model, TP,
+                                        # stage), the OS reclaims everything on
+                                        # process exit anyway — reload mid-sweep
+                                        # is pure overhead, set to 0.
 
 # Cold-cache vs. hot-cache measurement.
 #
@@ -203,6 +208,15 @@ fi
 echo "  to measure pure compile cost, manually clear cache before running:"
 echo "    rm -rf $NEURON_CACHE_DIR"
 echo
+echo "  IMPORTANT — if a previous sweep crashed (OOM, Ctrl-C, etc.),"
+echo "  the Neuron driver may hold orphaned HBM allocations that show up"
+echo "  as 'Model Constants: 2x' in the OOM dump on a fresh process."
+echo "  To fully reset Inf2 HBM:"
+echo "    sudo rmmod neuron && sudo modprobe neuron     # driver re-init"
+echo "    OR: reboot the instance"
+echo "  Check current HBM occupancy with:"
+echo "    neuron-ls -t                                  # if installed"
+echo
 echo "  grids (paper grids + scenario tweaks for max_num_seqs=32"
 echo "         + 4x-coarsened tokens to bound compile budget):"
 echo "    tokens           : $n_tok pts (4..8192; 4x step from paper)"
@@ -235,20 +249,24 @@ echo "Press Ctrl-C in 5s to abort..."
 sleep 5
 
 for spec in "${MODEL_TPS[@]}"; do
-    IFS='|' read -r model tps <<<"$spec"
+    IFS='|' read -r model tps_csv <<<"$spec"
+    IFS=',' read -ra tp_array <<<"$tps_csv"
+
     echo
     echo "############################################################"
-    echo "  $model  (TP=$tps)"
+    echo "  $model  (TP=$tps_csv)"
     echo "############################################################"
 
-    # Stage-level process isolation: Neuron Runtime accumulates HBM
-    # across NEFFs within one process (reload_every doesn't fully
-    # release weights / NEFF cache). To avoid OOM mid-sweep, we split
-    # the work across THREE python invocations per (model, TP). Each
-    # invocation gets a fresh process → OS-level HBM reset.
-    common_args=(
+    # Process isolation per (model, TP, stage). Neuron Runtime
+    # accumulates HBM across NEFFs AND across model-load calls within
+    # one process — neither reload_every nor switching TP inside one
+    # python invocation actually releases the previous TP's weights /
+    # NEFFs. The only reliable HBM reset is a fresh process. So per
+    # (model, TP) we run THREE python invocations, each with a SINGLE
+    # TP and a SINGLE stage.
+
+    base_args=(
         --model "$model"
-        --tp "$tps"
         --output-root "$OUTPUT_ROOT"
         --dtype "$DTYPE"
         --max-position-embeddings "$MAX_SEQ_LEN"
@@ -265,34 +283,41 @@ for spec in "${MODEL_TPS[@]}"; do
         --reload-every "$RELOAD_EVERY"
     )
 
-    # If user set RUN_TAG explicitly, suffix it per stage so the three
-    # subprocesses don't overwrite each other's profile_timing_<tag>.json.
-    # If RUN_TAG is empty, leave it empty in each call so profile_neuron's
-    # auto-numbering picks unique integers (_0, _1, _2) automatically.
-    if [[ -n "$RUN_TAG" ]]; then
-        attn_tag_args=(--run-tag "${RUN_TAG}_attn")
-        dense_tag_args=(--run-tag "${RUN_TAG}_dense")
-        perseq_tag_args=(--run-tag "${RUN_TAG}_per_seq")
-    else
-        attn_tag_args=()
-        dense_tag_args=()
-        perseq_tag_args=()
-    fi
+    for tp in "${tp_array[@]}"; do
+        echo
+        echo "  ══════════════ $model  TP=$tp  ══════════════"
 
-    echo
-    echo "  >>> [1/3] attention sweep"
-    python scripts/profile_neuron.py "${common_args[@]}" \
-        --skip-dense --skip-per-seq "${attn_tag_args[@]}"
+        # If user set RUN_TAG explicitly, suffix it per stage so the
+        # subprocesses don't overwrite each other's profile_timing.json.
+        # If RUN_TAG is empty, profile_neuron's auto-numbering picks
+        # unique integers per tp folder.
+        if [[ -n "$RUN_TAG" ]]; then
+            attn_tag_args=(--run-tag "${RUN_TAG}_attn")
+            dense_tag_args=(--run-tag "${RUN_TAG}_dense")
+            perseq_tag_args=(--run-tag "${RUN_TAG}_per_seq")
+        else
+            attn_tag_args=()
+            dense_tag_args=()
+            perseq_tag_args=()
+        fi
 
-    echo
-    echo "  >>> [2/3] dense sweep (fresh process; HBM reset)"
-    python scripts/profile_neuron.py "${common_args[@]}" \
-        --skip-attention --skip-per-seq "${dense_tag_args[@]}"
+        echo "  >>> [1/3] attention sweep  (TP=$tp, fresh process)"
+        python scripts/profile_neuron.py "${base_args[@]}" \
+            --tp "$tp" \
+            --skip-dense --skip-per-seq "${attn_tag_args[@]}"
 
-    echo
-    echo "  >>> [3/3] per_sequence sweep (fresh process; HBM reset)"
-    python scripts/profile_neuron.py "${common_args[@]}" \
-        --skip-attention --skip-dense "${perseq_tag_args[@]}"
+        echo
+        echo "  >>> [2/3] dense sweep  (TP=$tp, fresh process)"
+        python scripts/profile_neuron.py "${base_args[@]}" \
+            --tp "$tp" \
+            --skip-attention --skip-per-seq "${dense_tag_args[@]}"
+
+        echo
+        echo "  >>> [3/3] per_sequence sweep  (TP=$tp, fresh process)"
+        python scripts/profile_neuron.py "${base_args[@]}" \
+            --tp "$tp" \
+            --skip-attention --skip-dense "${perseq_tag_args[@]}"
+    done
 done
 
 echo
