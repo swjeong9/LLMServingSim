@@ -208,14 +208,10 @@ fi
 echo "  to measure pure compile cost, manually clear cache before running:"
 echo "    rm -rf $NEURON_CACHE_DIR"
 echo
-echo "  IMPORTANT — if a previous sweep crashed (OOM, Ctrl-C, etc.),"
-echo "  the Neuron driver may hold orphaned HBM allocations that show up"
-echo "  as 'Model Constants: 2x' in the OOM dump on a fresh process."
-echo "  To fully reset Inf2 HBM:"
-echo "    sudo rmmod neuron && sudo modprobe neuron     # driver re-init"
-echo "    OR: reboot the instance"
-echo "  Check current HBM occupancy with:"
-echo "    neuron-ls -t                                  # if installed"
+echo "  Watch HBM live (separate terminal):"
+echo "    neuron-top    # or: neuron-monitor"
+echo "  Process exit (Ctrl-C, kill, OOM) cleans HBM down to 0 GB —"
+echo "  the per-(TP, stage) subprocess split below relies on that."
 echo
 echo "  grids (paper grids + scenario tweaks for max_num_seqs=32"
 echo "         + 4x-coarsened tokens to bound compile budget):"
