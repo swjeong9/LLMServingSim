@@ -524,9 +524,23 @@ def load_model(model_id: str, tp: int, dtype_str: str, max_pos: int,
 
 
 def free_model(model):
+    """Best-effort release of a model on the Neuron device.
+
+    NOTE: ``del model`` here only drops *this function's local parameter
+    binding*. The caller's reference (e.g. ``state.model``) keeps the
+    object alive, so ``gc.collect()`` finds nothing to free. The caller
+    MUST drop its own reference (set to ``None``) BEFORE calling this
+    helper, otherwise the function is a no-op for memory.
+
+    Even with proper ref drop, the Neuron runtime keeps an internal
+    NEFF cache that's not flushed by Python GC — accumulated NEFFs may
+    persist on the device until the host process exits. For sweeps
+    that fill HBM, the only fully reliable reset is process-level
+    isolation (run each (model, TP) in a fresh subprocess).
+    """
     rt = _lazy_import_runtime()
     sync = _get_sync(rt)
-    del model
+    del model              # local binding only — caller must already have dropped theirs
     gc.collect()
     try:
         sync()
@@ -565,7 +579,20 @@ class _RuntimeState:
     def tick(self) -> bool:
         """Increment shot counter; reload if threshold reached. Returns
         True when a reload happened so callers can re-fetch module
-        references against the new model."""
+        references against the new model.
+
+        IMPORTANT: ``free_model(self.model)`` alone does NOT release HBM —
+        ``del model`` inside the function is only a local binding drop;
+        the actual Python object stays alive via ``self.model``. To
+        actually let Python collect the old model, we set ``self.model``
+        and friends to ``None`` *before* calling free_model, then call
+        gc.collect() AFTER the refs are gone, then sync. Even this is
+        only a Python-side fix — Neuron's runtime keeps NEFFs cached
+        internally regardless. For a true HBM reset (which we may need
+        on large sweeps where the runtime cache itself fills HBM), the
+        only reliable mechanism is to exit and re-spawn the host
+        process. Document this here so future readers don't expect more.
+        """
         self.shots += 1
         if (self.reload_every > 0
                 and self.shots >= self.reload_every
@@ -573,7 +600,23 @@ class _RuntimeState:
             t0 = time.perf_counter()
             print(f"    [reload] freeing model after {self.shots} shots "
                   f"to reset Neuron HBM...")
-            free_model(self.model)
+
+            # Step 1: drop all references to the old model BEFORE
+            # invoking free_model. Without this the ``del model`` inside
+            # free_model is a no-op (local binding only).
+            self.model = None
+            self.cfg = None
+            self.device = None
+            self.dtype = None
+            gc.collect()
+            gc.collect()        # second pass picks up cycle-broken refs
+            try:
+                sync = _get_sync(_lazy_import_runtime())
+                sync()
+            except Exception:
+                pass
+
+            # Step 2: now load the fresh model.
             self.model, self.cfg, self.device, self.dtype = self.reload_fn()
             self.shots = 0
             self.reload_count += 1
