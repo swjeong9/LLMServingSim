@@ -101,11 +101,12 @@ def summarize_profile(timing: Dict[str, Any]) -> Dict[str, Any]:
             cat = s.get("category", "?")
             d = by_cat.setdefault(cat, {"shots": 0, "wall_us": 0,
                                         "compile_us": 0,
-                                        "median_us_sum": 0})
+                                        "mean_us_sum": 0})
             d["shots"] += 1
             d["wall_us"] += s.get("wall_us", 0)
             d["compile_us"] += s.get("compile_us", 0)
-            d["median_us_sum"] += s.get("median_us", 0)
+            # Accept both new (mean_us) and old (median_us) field names.
+            d["mean_us_sum"] += s.get("mean_us", s.get("median_us", 0))
         out["tp_summary"][tp] = {
             "load_sec": st.get("load_sec"),
             "dense_sec": st.get("dense_sec"),
@@ -192,12 +193,12 @@ def render_profile_summary(label: str, summary: Dict[str, Any], shots: bool,
                 wall_s = d["wall_us"] / 1e6
                 comp_s = d["compile_us"] / 1e6
                 meas_s = (d["wall_us"] - d["compile_us"]) / 1e6
-                avg_med_us = (d["median_us_sum"] / d["shots"]) if d["shots"] else 0
+                avg_mean_us = (d["mean_us_sum"] / d["shots"]) if d["shots"] else 0
                 lines.append(f"      {cat:14s} shots={d['shots']:4d}   "
                              f"wall={wall_s:7.1f}s   "
                              f"compile={comp_s:7.1f}s   "
                              f"measure={meas_s:7.1f}s   "
-                             f"median t≈{avg_med_us:9.2f} us")
+                             f"mean t≈{avg_mean_us:9.2f} us")
 
     if shots:
         lines.append("")
@@ -212,15 +213,16 @@ def render_shots(label: str, timing: Dict[str, Any]) -> str:
     for tp, st in timing.get("tp_stages", {}).items():
         lines.append(f"  tp{tp}:")
         lines.append(f"    {'category':14s} {'layer/regime':18s} {'key':50s}  "
-                     f"{'first_us':>10s} {'median_us':>10s} {'compile_us':>10s}  "
+                     f"{'first_us':>10s} {'mean_us':>10s} {'compile_us':>10s}  "
                      f"{'wall_us':>10s}")
         for s in st.get("shots", []):
             cat = s.get("category", "?")
             lay = s.get("layer", s.get("regime", "?"))
             key = json.dumps(s.get("key", {}), separators=(",", ":"))
+            mean_us = s.get("mean_us", s.get("median_us", 0))  # back-compat
             lines.append(f"    {cat:14s} {lay:18s} {key[:50]:50s}  "
                          f"{s.get('first_call_us',0):10.1f} "
-                         f"{s.get('median_us',0):10.1f} "
+                         f"{mean_us:10.1f} "
                          f"{s.get('compile_us',0):10.1f}  "
                          f"{s.get('wall_us',0):10.1f}")
     return "\n".join(lines)

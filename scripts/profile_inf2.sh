@@ -66,7 +66,9 @@ DTYPE="${DTYPE:-bfloat16}"
 OUTPUT_ROOT="${OUTPUT_ROOT:-profiler/perf}"
 
 WARMUP="${WARMUP:-10}"
-REPEAT="${REPEAT:-30}"
+REPEAT="${REPEAT:-100}"     # raised from 30 — forward latency is microseconds,
+                            # so 100 reps × 1 ms ~= 100 ms per shot extra cost
+                            # for noticeably tighter mean estimates.
 RELOAD_EVERY="${RELOAD_EVERY:-200}"     # NEFF count between HBM reloads
                                         # (each NEFF ~20-40 MB; HBM is 16 GB/core
                                         # so 200 NEFFs ≈ 4-8 GB headroom — safe.
@@ -173,32 +175,25 @@ echo "  dtype        : $DTYPE"
 echo "  warmup       : $WARMUP   repeat : $REPEAT   reload_every : $RELOAD_EVERY"
 echo
 
-# Auto-detect cache state to choose a default RUN_TAG so cold and hot
-# runs save into separate profile_timing files. User can override via
-# RUN_TAG=<anything>.
+# Cache state is informational only — we do NOT branch on it. The user
+# decides when to clear (rm -rf $NEURON_CACHE_DIR) for a true cold-cache
+# measurement. Profile-timing JSON output uses auto-numbering (0, 1, 2,
+# ...) per variant root so repeated runs never overwrite each other —
+# this is robust regardless of cache state, intent, or interruption.
 if [[ -d "$NEURON_CACHE_DIR" ]]; then
     cache_size=$(du -sh "$NEURON_CACHE_DIR" 2>/dev/null | cut -f1 || echo "?")
     cache_neffs=$(find "$NEURON_CACHE_DIR" -name "model.neff" 2>/dev/null | wc -l | tr -d ' ')
+    echo "  neuron cache : $NEURON_CACHE_DIR  (${cache_size}, ${cache_neffs} neff)"
 else
-    cache_size="0B"
-    cache_neffs=0
+    echo "  neuron cache : $NEURON_CACHE_DIR  (not present)"
 fi
-if [[ "$cache_neffs" -eq 0 ]]; then
-    DETECTED_STATE="cold"
+if [[ -n "${RUN_TAG:-}" ]]; then
+    echo "  run_tag      : $RUN_TAG (explicit override; profile_timing_${RUN_TAG}.json)"
 else
-    DETECTED_STATE="hot"
+    echo "  run_tag      : auto (profile_timing_<N>.json — N = first unused integer)"
 fi
-RUN_TAG="${RUN_TAG:-$DETECTED_STATE}"
-
-echo "  neuron cache : $NEURON_CACHE_DIR  (${cache_size}, ${cache_neffs} neff)"
-echo "  detected     : $DETECTED_STATE   →  run_tag : $RUN_TAG"
-echo "  output       : profile_timing_${RUN_TAG}.json (per (model, variant))"
-if [[ "$DETECTED_STATE" = "hot" ]]; then
-    echo "                 hot cache → compile_us ≈ disk reload (not true compile)"
-    echo "                 to measure true compile cost, manually:"
-    echo "                   rm -rf $NEURON_CACHE_DIR"
-    echo "                 then set RUN_TAG=cold (or just rerun — auto-detected)"
-fi
+echo "  to measure pure compile cost, manually clear cache before running:"
+echo "    rm -rf $NEURON_CACHE_DIR"
 echo
 echo "  grids (paper grids + scenario tweaks for max_num_seqs=32"
 echo "         + 4x-coarsened tokens to bound compile budget):"

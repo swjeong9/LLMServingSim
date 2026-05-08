@@ -291,19 +291,23 @@ def time_callable(fn: Callable[[], Any], warmup: int, repeat: int
                   ) -> Tuple[float, Dict[str, Any]]:
     """Time fn() on Neuron via XLA mark_step + wait.
 
-    Returns ``(median_microseconds, meta)`` where ``meta`` has:
+    Returns ``(mean_microseconds, meta)`` where ``meta`` has:
 
       * ``first_call_us``  — wall time of the *first* warmup iteration.
         On Neuron this is dominated by the first-time NEFF compile for
         this shape (or near-zero if cache hit).
-      * ``median_warmup_us`` — median of warmup[1:] (post-compile),
-        useful as a sanity check vs ``median_us``.
-      * ``median_us``       — median of the timed phase (the value
-        used as the official measurement).
+      * ``mean_warmup_us`` — mean of warmup[1:] (post-compile),
+        useful as a sanity check vs ``mean_us``.
+      * ``mean_us``        — arithmetic mean of the timed phase (the
+        value used as the official measurement; with repeat=100 the
+        mean is stable enough that we don't need median's robustness).
+      * ``median_us``      — median of the timed phase (kept for
+        outlier detection; not used by the simulator).
+      * ``stdev_us``       — sample stdev of the timed phase.
       * ``n_warmup`` / ``n_timed``
-      * ``wall_us``         — total wall time invested in this shot
+      * ``wall_us``        — total wall time invested in this shot
         (warmup + timed). Sums ≈ total profiling cost.
-      * ``compile_us``      — first_call_us - median_us (best-effort
+      * ``compile_us``     — first_call_us - mean_us (best-effort
         compile cost estimate; clamped to >= 0).
 
     fn() must wrap whatever forward call we want to measure. Inputs
@@ -338,23 +342,27 @@ def time_callable(fn: Callable[[], Any], warmup: int, repeat: int
         timed_samples.append((t1 - t0) / 1000.0)  # ns -> us
         del out
 
+    mean_us   = statistics.fmean(timed_samples)
     median_us = statistics.median(timed_samples)
-    first_us = warmup_samples[0] if warmup_samples else median_us
-    median_warmup_us = (statistics.median(warmup_samples[1:])
-                        if len(warmup_samples) >= 2 else first_us)
+    stdev_us  = statistics.stdev(timed_samples) if len(timed_samples) >= 2 else 0.0
+    first_us = warmup_samples[0] if warmup_samples else mean_us
+    mean_warmup_us = (statistics.fmean(warmup_samples[1:])
+                      if len(warmup_samples) >= 2 else first_us)
     wall_us = sum(warmup_samples) + sum(timed_samples)
-    compile_us = max(first_us - median_us, 0.0)
+    compile_us = max(first_us - mean_us, 0.0)
 
     meta = {
-        "first_call_us":   first_us,
-        "median_warmup_us": median_warmup_us,
-        "median_us":       median_us,
-        "n_warmup":        warmup,
-        "n_timed":         repeat,
-        "wall_us":         wall_us,
-        "compile_us":      compile_us,
+        "first_call_us":  first_us,
+        "mean_warmup_us": mean_warmup_us,
+        "mean_us":        mean_us,
+        "median_us":      median_us,
+        "stdev_us":       stdev_us,
+        "n_warmup":       warmup,
+        "n_timed":        repeat,
+        "wall_us":        wall_us,
+        "compile_us":     compile_us,
     }
-    return median_us, meta
+    return mean_us, meta
 
 
 # ======================================================================
@@ -838,10 +846,12 @@ def parse_args():
     p.add_argument("--skip-attention", action="store_true",
                    help="Write empty attention.csv (debug; speeds up first run)")
     p.add_argument("--run-tag", default="",
-                   help="Suffix for profile_timing.json (e.g. 'cold', 'hot'). "
-                        "If set, writes profile_timing_<tag>.json — useful when "
-                        "running the same sweep twice (cold cache vs hot cache) "
-                        "and wanting to keep both cost breakdowns side by side.")
+                   help="Optional explicit suffix for profile_timing_<tag>.json. "
+                        "If empty (default), the script picks the smallest "
+                        "non-negative integer N for which profile_timing_N.json "
+                        "does not yet exist under the variant root, so repeated "
+                        "runs (cold cache, hot cache, etc.) never overwrite "
+                        "each other. Pass an explicit tag to force a name.")
     return p.parse_args()
 
 
@@ -1052,12 +1062,27 @@ def main():
                args.max_num_batched_tokens, args.max_num_seqs)
     print(f"\n[✓] meta.yaml written")
 
-    # Save timing artifact (re-loadable for comparison via show_profile_timing.py)
+    # Save timing artifact (re-loadable for comparison via show_profile_timing.py).
+    # Default policy: auto-pick the smallest non-negative integer N for which
+    # profile_timing_<N>.json does not yet exist, so repeated invocations
+    # never overwrite earlier results. --run-tag overrides with a custom name.
     timing_run["ended_at"] = time.strftime("%Y-%m-%dT%H:%M:%S+00:00", time.gmtime())
     timing_run["wall_clock_total_sec"] = time.perf_counter() - run_t0
-    timing_run["run_tag"] = args.run_tag or None
-    timing_filename = (f"profile_timing_{args.run_tag}.json"
-                       if args.run_tag else "profile_timing.json")
+    if args.run_tag:
+        tag = args.run_tag
+    else:
+        import re as _re
+        used = set()
+        for f in out_root.glob("profile_timing_*.json"):
+            m = _re.match(r"profile_timing_(\d+)\.json$", f.name)
+            if m:
+                used.add(int(m.group(1)))
+        n = 0
+        while n in used:
+            n += 1
+        tag = str(n)
+    timing_run["run_tag"] = tag
+    timing_filename = f"profile_timing_{tag}.json"
     timing_path = out_root / timing_filename
     import json as _json
     timing_path.write_text(_json.dumps(timing_run, indent=2, default=str))
