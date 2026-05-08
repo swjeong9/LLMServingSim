@@ -1116,6 +1116,36 @@ def main():
                               reload_fn=_reload_for_tp,
                               reload_every=args.reload_every)
 
+        # Sweep order: attention FIRST (it's the OOM-prone stage on Inf2 —
+        # large pc compiles allocate the biggest scratchpad and surface
+        # any HBM problems quickly. Failing fast saves hours vs failing
+        # at the end of dense). Then dense, then per_seq.
+
+        # --- attention ---
+        if args.skip_attention:
+            (out_tp / "attention.csv").write_text(
+                "prefill_chunk,kv_prefill,n_decode,kv_decode,time_us\n")
+            print("  [-] attention.csv (skipped via --skip-attention)")
+        else:
+            print("  -- attention sweep --")
+            sweep_t0 = time.perf_counter()
+            attn_rows, attn_shots = sweep_attention(
+                state, arch,
+                prefill_grid, kv_prefill_grid,
+                decode_n_grid, kv_decode_grid,
+                [], args.warmup, args.repeat)   # dense_rows arg is unused inside
+            stage_t["attn_sec"] = time.perf_counter() - sweep_t0
+            stage_t["attn_reload_sec"] = state.take_reload_sec()
+            stage_t["attn_compile_sec"], stage_t["attn_measure_sec"] = _stage_split(attn_shots)
+            write_t0 = time.perf_counter()
+            write_attention_csv(attn_rows, out_tp / "attention.csv")
+            stage_t["write_sec"] += time.perf_counter() - write_t0
+            stage_t["shots"].extend(attn_shots)
+            print(f"  [✓] attention.csv ({len(attn_rows)} rows; wall {stage_t['attn_sec']:.1f}s; "
+                  f"compile {stage_t['attn_compile_sec']:.1f}s, "
+                  f"measure {stage_t['attn_measure_sec']:.1f}s, "
+                  f"reload {stage_t['attn_reload_sec']:.1f}s)")
+
         # --- dense ---
         print("  -- dense sweep --")
         sweep_t0 = time.perf_counter()
@@ -1149,31 +1179,6 @@ def main():
               f"compile {stage_t['per_seq_compile_sec']:.1f}s, "
               f"measure {stage_t['per_seq_measure_sec']:.1f}s, "
               f"reload {stage_t['per_seq_reload_sec']:.1f}s)")
-
-        # --- attention ---
-        if args.skip_attention:
-            (out_tp / "attention.csv").write_text(
-                "prefill_chunk,kv_prefill,n_decode,kv_decode,time_us\n")
-            print("  [-] attention.csv (skipped via --skip-attention)")
-        else:
-            print("  -- attention sweep --")
-            sweep_t0 = time.perf_counter()
-            attn_rows, attn_shots = sweep_attention(
-                state, arch,
-                prefill_grid, kv_prefill_grid,
-                decode_n_grid, kv_decode_grid,
-                dense_rows, args.warmup, args.repeat)
-            stage_t["attn_sec"] = time.perf_counter() - sweep_t0
-            stage_t["attn_reload_sec"] = state.take_reload_sec()
-            stage_t["attn_compile_sec"], stage_t["attn_measure_sec"] = _stage_split(attn_shots)
-            write_t0 = time.perf_counter()
-            write_attention_csv(attn_rows, out_tp / "attention.csv")
-            stage_t["write_sec"] += time.perf_counter() - write_t0
-            stage_t["shots"].extend(attn_shots)
-            print(f"  [✓] attention.csv ({len(attn_rows)} rows; wall {stage_t['attn_sec']:.1f}s; "
-                  f"compile {stage_t['attn_compile_sec']:.1f}s, "
-                  f"measure {stage_t['attn_measure_sec']:.1f}s, "
-                  f"reload {stage_t['attn_reload_sec']:.1f}s)")
 
         stage_t["reload_count"] = state.reload_count
         stage_t["reload_sec_total"] = state.reload_sec_total
