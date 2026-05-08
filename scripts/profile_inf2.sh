@@ -10,18 +10,20 @@
 #                                     ≈ 19 k cells; we keep only the two
 #                                     pure regions)
 #
-# Scenario tweaks vs. paper (max_num_seqs = 32 in our setup):
+# Scenario tweaks vs. paper (max_num_seqs = 32, compile cost reduction):
 #
 #   sequences  : capped at 32      (paper: up to 256)
 #   n_decode   : capped at 32      (paper: up to 256)
-#   tokens     : extended to 8192  (paper: 2048; LENS scenarios reach
-#                                    ~8 k iter tokens with 4 k prefill)
-#   prefill_chunk : extended to 8192  (paper: 2048; attention is O(pc²)
-#                                       so extrapolation isn't safe — we
-#                                       must measure)
+#   tokens     : 4x-coarsened step + extended to 8192 (paper had
+#                step 1/4/16; ours step 4/16/64. Token-linear GEMM
+#                interpolates well from sparse measurements, and dense
+#                makes up the bulk of compile time.)
+#   prefill_chunk : extended to 8192 (paper: 2048; attention is O(pc²)
+#                                      so extrapolation isn't safe.)
 #
 # Final grids:
-#   tokens           157 points (paper 152 + 5 sparse extension to 8192)
+#   tokens            43 points (paper 152 → 4x step coarsened to 38
+#                                 in [4..2048] + 5 sparse pts to 8192)
 #   sequences         20 points (1..16 step1, 20..32 step4)
 #   prefill_chunk     24 points (paper 19 + 5 sparse to 8192)
 #   kv_prefill         1 point  (0)
@@ -31,10 +33,10 @@
 #                                 kv_d+1 > max_position_embeddings)
 #
 # Per (model, TP):
-#   Llama / Mistral  : ~1239 shots × 40 forwards = ~50 k forward calls
-#   Qwen3 14B        : ~1396 shots × 40 forwards = ~56 k forward calls
-#   ~1240 NEFF compiles on first run.
-#   Wall clock: ~3-6 h on first run, minutes on rerun (cache hit).
+#   Llama / Mistral  : 7×43 + 20 + 24 + 96 =  441 shots
+#   Qwen3 14B        : 8×43 + 20 + 24 + 96 =  484 shots
+#   ~440-480 NEFF compiles on first run.
+#   Wall clock: ~30-45 min per (model, TP) at ~2 s/shot compile cost.
 #
 # Profiling cost vs. LENS (NxDI bucket profiling): ~100x more NEFFs
 # (LENS profiles 14 buckets; this sweep emits ~1300 distinct shapes).
@@ -103,17 +105,20 @@ MODEL_TPS=(
 # Paper grids (extracted from RTXPRO6000/Llama-3.1-8B/bf16/tp1)
 # =============================================================================
 
-# 157 token points (paper 152 up to 2048 + sparse extension to 8192)
-TOKENS_GRID="1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,\
-20,24,28,32,36,40,44,48,52,56,60,64,\
-80,96,112,128,144,160,176,192,208,224,240,256,\
-272,288,304,320,336,352,368,384,400,416,432,448,464,480,496,512,\
-528,544,560,576,592,608,624,640,656,672,688,704,720,736,752,768,\
-784,800,816,832,848,864,880,896,912,928,944,960,976,992,1008,1024,\
-1040,1056,1072,1088,1104,1120,1136,1152,1168,1184,1200,1216,1232,1248,1264,1280,\
-1296,1312,1328,1344,1360,1376,1392,1408,1424,1440,1456,1472,1488,1504,1520,1536,\
-1552,1568,1584,1600,1616,1632,1648,1664,1680,1696,1712,1728,1744,1760,1776,1792,\
-1808,1824,1840,1856,1872,1888,1904,1920,1936,1952,1968,1984,2000,2016,2032,2048,\
+# 43 token points: paper grid coarsened by 4x step + sparse extension.
+# Compile cost dominates the sweep (~89% wall in cold-cache run), and a
+# 4x step is plenty for token-linear dense GEMM interpolation.
+#
+#   paper step pattern:   1 (in [1,16]) → 4 (in [20,64]) → 16 (in [80,2048])
+#   our 4x-coarsened:     4 (in [4,16]) → 16 (in [32,64]) → 64 (in [128,2048])
+#                         + 5 sparse pts to 8192
+#
+# Going below tokens=4 is rarely useful: pure-decode iteration with
+# n_decode=1 is the only case, and that's covered by per_seq sweep at
+# sequences=1 anyway. Drop tokens={1,2,3} to save 3 × 7 layer = 21 shots.
+TOKENS_GRID="4,8,12,16,32,48,64,\
+128,192,256,320,384,448,512,576,640,704,768,832,896,960,1024,\
+1088,1152,1216,1280,1344,1408,1472,1536,1600,1664,1728,1792,1856,1920,1984,2048,\
 2560,3072,4096,6144,8192"
 
 # 20 sequence points (paper pattern up to max_num_seqs = 32)
@@ -178,8 +183,9 @@ else
     echo "  neuron cache : $NEURON_CACHE_DIR  (not present; this run starts cold)"
 fi
 echo
-echo "  grids (paper bundle + scenario tweaks for max_num_seqs=32):"
-echo "    tokens           : $n_tok pts (1..8192; paper 152 + 5 ext)"
+echo "  grids (paper grids + scenario tweaks for max_num_seqs=32"
+echo "         + 4x-coarsened tokens to bound compile budget):"
+echo "    tokens           : $n_tok pts (4..8192; 4x step from paper)"
 echo "    sequences        : $n_seq pts (1..32; capped from paper 256)"
 echo "    prefill_chunk    : $n_pc pts  (16..8192; paper 19 + 5 ext)"
 echo "    kv_prefill       : $n_kvp pt  (0 — chunked prefill excluded)"
