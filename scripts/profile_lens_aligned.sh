@@ -78,22 +78,31 @@ LENS_ILS="64,127,128,129,130,255,256,257,260,511,512,513,520,1023,1024,1025,1030
 #   * 1        — endpoint anchor for small extrapolation; cheap to add
 TOKENS_GRID="1,32,${LENS_ILS}"
 
-# per_sequence.sequences: {1, 32}.
+# per_sequence.sequences: powers of 2 from 1 to 32.
 #   * 1 = lm_head at the end of each prefill iter (one new token)
-#   * 32 = lm_head + sampler in batched decode iter (32 sequences)
-SEQUENCES_GRID="1,32"
+#   * 32 = lm_head + sampler in batched decode iter (LENS B=32)
+#   * 2,4,8,16 = filled in so the simulator can also predict static-batch
+#     scenarios (compare_static.py mode A/B) at intermediate batch sizes
+#     without crude 1↔32 interpolation. Add to ${SEQUENCES_GRID} env var
+#     to override (e.g. SEQUENCES_GRID=1,32 for strict LENS-only).
+SEQUENCES_GRID="${SEQUENCES_GRID:-1,2,4,8,16,32}"
 
 # attn prefill_chunk: LENS ils. kv_prefill = 0 always (no chunked prefill).
 PREFILL_GRID="${LENS_ILS}"
 KV_PREFILL_GRID="0"
 
-# attn n_decode: 32 only (LENS uses uniform batch=32). kv_decode covers
-# the range [min_il=64, max_il+max_ol=8050]. We use powers of 2 plus
-# LENS-il anchors so interpolation across each combo's il+k trajectory
-# is accurate. 8192 is omitted because kv_d+1 must fit in
+# attn n_decode: powers of 2 to mirror SEQUENCES_GRID. LENS itself only
+# exercises n_decode=32, but matching the per_sequence axis keeps the
+# attn batch dim symmetric and lets the simulator score smaller batches
+# without interpolation error. Override with DECODE_N_GRID=32 for strict
+# LENS-only.
+#
+# kv_decode covers the range [min_il=64, max_il+max_ol=8050]. Powers of 2
+# plus LENS-il anchors so interpolation across each combo's il+k decode
+# trajectory is accurate. 8192 is omitted because kv_d+1 must fit in
 # max_position_embeddings (the script auto-skips kd=8192 anyway).
-DECODE_N_GRID="32"
-KV_DECODE_GRID="64,128,256,512,1024,2048,4096,4100,8050"
+DECODE_N_GRID="${DECODE_N_GRID:-1,2,4,8,16,32}"
+KV_DECODE_GRID="${KV_DECODE_GRID:-64,128,256,512,1024,2048,4096,4100,8050}"
 
 # =============================================================================
 # Execute
