@@ -263,16 +263,36 @@ instance-id: i-00a9f3ecb6d998968
 
 ### 2.2 의존성
 
+> **⚠️ uv 쓰지 말 것**. `uv run python ...` 은 격리된 venv 를 만들어 시스템 site-packages 를 무시한다. Neuron 의 핵심 패키지 (`torch-xla`, `torch-neuronx`, `libneuronxla`) 는 AWS 가 자체 pip index (`https://pip.repos.neuron.amazonaws.com`) 로 배포하고 system `.so` 의존성도 있어서 DLAMI 빌트인 venv 가 정석. uv 환경에서는 `ModuleNotFoundError: No module named 'torch_xla'` 등이 뜬다.
+
 DLAMI 의 Neuron 가상환경 활성화 + 추가 패키지:
 
 ```bash
+# (1) 정확한 venv 경로 확인 — DLAMI 버전 / Neuron SDK 버전마다 다름
+ls /opt/ | grep -i neuron
+# 예시: aws_neuronx_venv_pytorch_2_5  /  aws_neuronx_venv_pytorch_2_6  ...
+
+# (2) 활성화 (위에서 본 실제 이름으로)
 source /opt/aws_neuronx_venv_pytorch_2_5/bin/activate
-# 핵심 의존성 (DLAMI 에 이미 있을 가능성 높음)
+
+# (3) 본 가이드용 추가 패키지 — DLAMI 에 이미 있을 가능성 높지만 멱등
 pip install -U transformers accelerate sentencepiece pyyaml
 
-# 동작 확인
-python -c "import torch; import torch_xla; import torch_neuronx; print('eager OK')"
+# (4) 동작 확인 — 셋 다 import 되어야 함
+python -c "import torch, torch_xla, torch_neuronx; print('eager OK')"
 ```
+
+만약 **굳이 uv 를 써야 하는 경우** (drone CI 등): AWS Neuron pip index 를 명시적으로 추가:
+
+```bash
+uv pip install \
+  --index-url https://pip.repos.neuron.amazonaws.com \
+  --extra-index-url https://pypi.org/simple \
+  torch-neuronx torch-xla libneuronxla neuronx-cc
+uv pip install transformers accelerate sentencepiece pyyaml
+```
+
+이 길은 호환 버전 매트릭스 / system `.so` 경로 등 신경쓸 게 많음. 권장 X.
 
 > NxDI (`neuronx-distributed-inference`) 는 본 가이드에 **불필요**. 사용자가 production 으로 NxDI 를 따로 쓰는 것과 무관 — 프로파일링/검증은 eager 안에서 다 끝남.
 
