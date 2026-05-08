@@ -203,14 +203,18 @@ for name, path in [
 "
 ```
 
-기대 (BF16):
+실측 결과 (BF16, 2026-05-08, 사용자 환경):
 ```
-Llama-3.2-1B        : full   2.5 GB, 1-layer trick:  1.06 GB
-Mistral-7B-v0.3     : full  14.4 GB, 1-layer trick:  0.81 GB
-Qwen3-14B           : full  29.5 GB, 1-layer trick:  3.66 GB
+Llama-3.2-1B        : full   3.5 GB, 1-layer trick:  1.70 GB
+Mistral-7B-v0.3     : full  14.8 GB, 1-layer trick:  1.24 GB
+Qwen3-14B           : full  31.1 GB, 1-layer trick:  5.33 GB
 ```
 
-→ **1-layer 트릭으로 모두 단일 NeuronCore (16 GB) 에 여유롭게 들어감**. 이게 가능해야 TP=1 부터 8 까지 다 같은 코어에서 sweep 할 수 있음.
+(위 한-줄 계산은 weight 만 잡고 activation/임시 버퍼는 무시. 실제 런타임은 +30~50% 잡아두는 게 안전.)
+
+→ **1-layer 트릭으로 모두 단일 NeuronCore-v2 (16 GB) 에 여유롭게 들어감** (Qwen3 14B 도 5.33 GB → activation 2~3× 잡아도 16 GB 미만). 이게 가능해야 TP=1 부터 8 까지 다 같은 코어에서 sweep 할 수 있음.
+
+> **검증(§4) 단계는 다름** — 거기서는 NUM_LAYERS=full 로 다시 로드하므로 Qwen3 14B 의 31 GB 는 단일 코어 OOM. `--num-layers 4` 같은 식으로 줄여서 검증.
 
 ---
 
