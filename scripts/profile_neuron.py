@@ -361,11 +361,20 @@ def time_callable(fn: Callable[[], Any], warmup: int, repeat: int
 # Model loading: NUM_LAYERS=1 + TP shard emulation
 # ======================================================================
 def shard_config(cfg, tp: int):
-    """Mutate cfg in-place to emulate TP=tp by dividing shardable dims."""
-    if tp == 1:
-        return cfg
+    """Mutate cfg in-place to emulate TP=tp by dividing shardable dims.
+
+    Also pins ``cfg.head_dim`` to its pre-shard value so post-shard
+    code can read it without going through the (now wrong)
+    ``hidden_size // num_attention_heads`` shortcut.
+    """
     nh = cfg.num_attention_heads
     nkv = getattr(cfg, "num_key_value_heads", nh)
+    # Materialize head_dim before we touch num_attention_heads — otherwise
+    # `H // num_attention_heads` after sharding overestimates by a factor of tp.
+    if not getattr(cfg, "head_dim", None):
+        cfg.head_dim = cfg.hidden_size // nh
+    if tp == 1:
+        return cfg
     inter = cfg.intermediate_size
     if nh % tp or nkv % tp or inter % tp:
         raise ValueError(
@@ -504,50 +513,15 @@ def sweep_per_sequence(model, cfg, dtype, device, arch: str,
     return rows, shot_timings
 
 
-# Attention: time the full self_attn forward at various (pc, kv_p, n, kv_d).
-# Subtract the matching q_proj + k_proj + v_proj + o_proj cost (looked up
-# from the dense sweep) to leave the kernel-only residual.
-def _build_kv_cache(cfg, dtype, device, kv_len: int, batch: int):
-    """Construct a HF DynamicCache populated with zero K/V tensors at layer 0."""
-    rt = _lazy_import_runtime()
-    torch = rt["torch"]
-    try:
-        from transformers import DynamicCache
-    except ImportError:
-        from transformers.cache_utils import DynamicCache
-
-    nkv = cfg.num_key_value_heads
-    head_dim = getattr(cfg, "head_dim", cfg.hidden_size // cfg.num_attention_heads)
-    cache = DynamicCache()
-    if kv_len <= 0:
-        return cache
-    k = torch.zeros((batch, nkv, kv_len, head_dim), dtype=dtype, device=device)
-    v = torch.zeros((batch, nkv, kv_len, head_dim), dtype=dtype, device=device)
-    cache.update(k, v, layer_idx=0,
-                 cache_kwargs={"cache_position": torch.arange(kv_len, device=device)})
-    return cache
-
-
-def _projection_us_at(dense_rows: List[Tuple[str, int, float]],
-                      tokens: int) -> float:
-    """Sum qkv_proj + o_proj at the given token count (linear interp)."""
-    def lookup(layer: str, n: int) -> float:
-        pts = sorted([(t, us) for (l, t, us) in dense_rows if l == layer])
-        if not pts:
-            return 0.0
-        if n <= pts[0][0]:
-            return pts[0][1]
-        if n >= pts[-1][0]:
-            return pts[-1][1]
-        for i in range(len(pts) - 1):
-            a, b = pts[i], pts[i + 1]
-            if a[0] <= n <= b[0]:
-                return a[1] + (b[1] - a[1]) * (n - a[0]) / (b[0] - a[0])
-        return pts[-1][1]
-
-    return lookup("qkv_proj", tokens) + lookup("o_proj", tokens)
-
-
+# Attention sweep: time `F.scaled_dot_product_attention` directly with
+# synthesised (q, k, v) tensors of the right shapes for each (pc, kv_p,
+# n, kv_d) combination. Bypasses HF's self_attn.forward + DynamicCache
+# entirely — Neuron's static-shape compiler can't capture pre-populated
+# DynamicCache state across calls (cache.update's torch.cat is traced
+# inside but the past tensors aren't visible as graph inputs, leading
+# to the V/K being treated as length-1 in the compiled graph). The
+# simulator's attention.csv expects kernel-only timing anyway (qkv_proj
+# / o_proj are timed separately and live in dense.csv).
 def sweep_attention(model, cfg, dtype, device, arch: str,
                     prefill_grid: Sequence[int],
                     kv_prefill_grid: Sequence[int],
@@ -556,48 +530,53 @@ def sweep_attention(model, cfg, dtype, device, arch: str,
                     dense_rows: List[Tuple[str, int, float]],
                     warmup: int, repeat: int,
                     ) -> Tuple[List[Tuple[int, int, int, int, float]], List[Dict[str, Any]]]:
-    """4D-axis attention sweep. Pure prefill and pure decode regimes only.
+    """SDPA kernel sweep over (prefill_chunk, kv_prefill, n_decode, kv_decode).
 
     Returns (rows, shot_timings).
-      rows: (prefill_chunk, kv_prefill, n_decode, kv_decode, time_us) — kernel-only
-            (full self_attn − qkv_proj − o_proj) for the simulator
-      shot_timings: per-shot timing dicts for profile_timing.json
+      rows: (prefill_chunk, kv_prefill, n_decode, kv_decode, time_us) — pure
+            scaled_dot_product_attention kernel time, ready for the simulator's
+            attention.csv lookup.
+      shot_timings: per-shot timing dicts for profile_timing.json.
+
+    ``dense_rows`` is no longer needed for subtraction (kept for backward-compat
+    but unused).
     """
+    del dense_rows  # no longer used; kernel time is measured directly
+
     rt = _lazy_import_runtime()
     torch = rt["torch"]
-    self_attn = get_module(model, ARCH_DESC[arch]["attention_module"])
+    F = torch.nn.functional
+
     H = cfg.hidden_size
     nh = cfg.num_attention_heads
-    head_dim = getattr(cfg, "head_dim", H // nh)
+    nkv = cfg.num_key_value_heads
+    head_dim = cfg.head_dim   # set explicitly by shard_config()
+    n_rep = max(nh // max(nkv, 1), 1)
 
-    def call_self_attn(hidden, position_ids, past_key_value):
-        """Try a few HF-version-friendly call signatures."""
-        try:
-            return self_attn(
-                hidden_states=hidden,
-                position_ids=position_ids,
-                past_key_value=past_key_value,
-                use_cache=False,
-            )
-        except TypeError:
-            # newer HF (transformers >= 4.45) requires the position_embeddings
-            # tuple. cos/sin must match the *query* sequence length
-            # (= hidden.shape[1]) — NOT the full context length. Rotary is
-            # applied to q/k BEFORE they enter the KV cache, so there's no
-            # broadcast against the past portion. Earlier versions of this
-            # script used pc + kv_p which broke shape compatibility whenever
-            # kv_p > 0.
-            q_seq_len = hidden.shape[1]
-            cos = torch.zeros((1, q_seq_len, head_dim),
-                              dtype=hidden.dtype, device=hidden.device)
-            sin = torch.zeros_like(cos)
-            return self_attn(
-                hidden_states=hidden,
-                position_embeddings=(cos, sin),
-                position_ids=position_ids,
-                past_key_value=past_key_value,
-                use_cache=False,
-            )
+    def _build_qkv(B: int, q_len: int, k_len: int):
+        """Build (q, k, v) tensors with the right shapes. K/V are
+        repeat_interleave'd to match Q's head count (mirrors GQA expansion
+        that happens inside HF attention before SDPA)."""
+        q = torch.zeros((B, nh, q_len, head_dim), dtype=dtype, device=device)
+        k = torch.zeros((B, nkv, k_len, head_dim), dtype=dtype, device=device)
+        v = torch.zeros((B, nkv, k_len, head_dim), dtype=dtype, device=device)
+        if n_rep > 1:
+            k = k.repeat_interleave(n_rep, dim=1)
+            v = v.repeat_interleave(n_rep, dim=1)
+        return q, k, v
+
+    def _build_prefill_mask(pc: int, kv_p: int):
+        """Causal mask for prefill: query at relative pos i (absolute kv_p+i)
+        attends to keys at [0, kv_p+i]. Returns float mask of shape
+        (pc, kv_p+pc) with 0 for attend / -inf for blocked."""
+        if pc + kv_p == 0:
+            return None
+        mask = torch.zeros((pc, kv_p + pc), dtype=dtype, device=device)
+        idx_q = torch.arange(pc, device=device).unsqueeze(1)        # (pc, 1)
+        idx_k = torch.arange(kv_p + pc, device=device).unsqueeze(0)  # (1, kv_p+pc)
+        blocked = idx_k > (kv_p + idx_q)
+        mask = mask.masked_fill(blocked, float("-inf"))
+        return mask
 
     rows: List[Tuple[int, int, int, int, float]] = []
     shot_timings: List[Dict[str, Any]] = []
@@ -607,63 +586,60 @@ def sweep_attention(model, cfg, dtype, device, arch: str,
         for kv_p in kv_prefill_grid:
             if pc + kv_p > cfg.max_position_embeddings:
                 continue
-            hidden = torch.zeros((1, pc, H), dtype=dtype, device=device)
-            past_kv = _build_kv_cache(cfg, dtype, device, kv_p, batch=1)
-            position_ids = torch.arange(kv_p, kv_p + pc, device=device).unsqueeze(0)
+            q, k, v = _build_qkv(B=1, q_len=pc, k_len=pc + kv_p)
+            attn_mask = _build_prefill_mask(pc, kv_p)
 
-            def call(h=hidden, pi=position_ids, pkv=past_kv):
-                return call_self_attn(h, pi, pkv)
+            def call(q=q, k=k, v=v, m=attn_mask):
+                return F.scaled_dot_product_attention(q, k, v, attn_mask=m,
+                                                      is_causal=False)
 
             try:
-                t_full, meta = time_callable(call, warmup, repeat)
+                t_kernel, meta = time_callable(call, warmup, repeat)
             except Exception as e:
                 print(f"    [WARN] attn prefill pc={pc} kv_p={kv_p} failed: {e}")
                 continue
-            t_proj = _projection_us_at(dense_rows, pc)
-            t_kernel = max(t_full - t_proj, 0.5)
             rows.append((pc, kv_p, 0, 0, t_kernel))
             shot_timings.append({
                 "category": "attention",
                 "regime": "prefill",
                 "key": {"prefill_chunk": pc, "kv_prefill": kv_p,
                         "n_decode": 0, "kv_decode": 0},
-                "t_full_us": t_full, "t_proj_us": t_proj, "t_kernel_us": t_kernel,
+                "t_kernel_us": t_kernel,
                 **meta,
             })
             print(f"    attn   prefill pc={pc:5d} kv_p={kv_p:5d}                 "
-                  f"-> {t_full:9.3f} - {t_proj:7.3f} = {t_kernel:9.3f} us  "
+                  f"-> {t_kernel:9.3f} us  "
                   f"(compile~{meta['compile_us']/1000:6.1f}ms, wall {meta['wall_us']/1e6:6.2f}s)")
 
     # ---- Pure decode (0, 0, n, kv_d) ----
     for n in decode_n_grid:
         for kv_d in kv_decode_grid:
-            if kv_d > cfg.max_position_embeddings:
+            if kv_d + 1 > cfg.max_position_embeddings:
                 continue
-            hidden = torch.zeros((n, 1, H), dtype=dtype, device=device)
-            past_kv = _build_kv_cache(cfg, dtype, device, kv_d, batch=n)
-            position_ids = torch.full((n, 1), kv_d, dtype=torch.long, device=device)
+            # Single-token decode attending to full kv_d+1 context (the
+            # +1 captures the new token's own k/v entry).
+            q, k, v = _build_qkv(B=n, q_len=1, k_len=kv_d + 1)
 
-            def call(h=hidden, pi=position_ids, pkv=past_kv):
-                return call_self_attn(h, pi, pkv)
+            def call(q=q, k=k, v=v):
+                return F.scaled_dot_product_attention(q, k, v, attn_mask=None,
+                                                      is_causal=False)
 
             try:
-                t_full, meta = time_callable(call, warmup, repeat)
+                t_kernel, meta = time_callable(call, warmup, repeat)
             except Exception as e:
                 print(f"    [WARN] attn decode n={n} kv_d={kv_d} failed: {e}")
                 continue
-            t_proj = _projection_us_at(dense_rows, n)
-            t_kernel = max(t_full - t_proj, 0.5)
             rows.append((0, 0, n, kv_d, t_kernel))
             shot_timings.append({
                 "category": "attention",
                 "regime": "decode",
                 "key": {"prefill_chunk": 0, "kv_prefill": 0,
                         "n_decode": n, "kv_decode": kv_d},
-                "t_full_us": t_full, "t_proj_us": t_proj, "t_kernel_us": t_kernel,
+                "t_kernel_us": t_kernel,
                 **meta,
             })
             print(f"    attn   decode                       n={n:4d} kv_d={kv_d:5d}"
-                  f" -> {t_full:9.3f} - {t_proj:7.3f} = {t_kernel:9.3f} us  "
+                  f" -> {t_kernel:9.3f} us  "
                   f"(compile~{meta['compile_us']/1000:6.1f}ms, wall {meta['wall_us']/1e6:6.2f}s)")
 
     rows.sort()
