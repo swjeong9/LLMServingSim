@@ -3,9 +3,10 @@
 #
 # Targets the same (input_len, output_len, batch_size=32) measurement
 # points the LENS profiler uses (~/Desktop/npu_chip_project/LENS/
-# inference_profiling/inf2/profile.csv, 60 combos), so the LLMServingSim
-# simulator can predict each LENS combo's batch e2e latency with zero
-# interpolation error at the LENS measurement points.
+# inference_profiling/inf2/profile_min14.csv, 14 combos = 7 prefill
+# buckets × 2 ol values (min, max)), so the LLMServingSim simulator
+# can predict each LENS combo's batch e2e latency at exactly the
+# (il, ol) points LENS measures.
 #
 # Mapping
 # -------
@@ -66,20 +67,34 @@ MODEL_TPS=(
 # =============================================================================
 # LENS-aligned grids
 # =============================================================================
-# LENS profile.csv has these 22 unique input_len (il) values across the
-# 60 combos (35 bucket_sweep + 10 cross_bucket + 15 boundary). Output
-# from `python -c "import csv; print(sorted({int(r['input_len']) for r in
-# csv.DictReader(open('LENS/inference_profiling/inf2/profile.csv'))}))"`
-LENS_ILS="64,127,128,129,130,255,256,257,260,511,512,513,520,1023,1024,1025,1030,2047,2048,2049,2050,4100"
+# LENS profile_min14.csv defines 14 (il, ol) combos = 7 prefill buckets
+# × 2 ol values (min and max for that bucket). Each combo's decode
+# trajectory visits kv_d ∈ {il, il+1, ..., il+ol-2}; the simulator's
+# kv_decode lookup needs anchors at start (il) and end (il+ol) of every
+# combo's trajectory to keep linear-interp accurate without measuring
+# every integer in between.
+#
+# The 14 combos:
+#   ( 64,    5), ( 64,   60)
+#   (130,   10), (130,  120)
+#   (260,   20), (260,  240)
+#   (520,   40), (520,  480)
+#   (1030,  80), (1030, 960)
+#   (2050, 160), (2050,1950)
+#   (4100, 300), (4100,3950)
 
-# dense.tokens: LENS ils ∪ {32} ∪ {1}.
-#   * LENS ils — every prefill iter at LENS's ctx_batch_size=1 visits one
-#   * 32       — every batched decode iter has 32 dense tokens
-#   * 1        — endpoint anchor for small extrapolation; cheap to add
-# (Earlier we added 6144/8192 upper anchors for batched-prefill
-# scenarios, but the goal of this script is to measure at the same
-# points LENS does — NOT to densify our grid for better interpolation.
-# Removed.)
+# 7 unique input lengths
+LENS_ILS="64,130,260,520,1030,2050,4100"
+
+# 14 unique (il+ol) decode trajectory endpoints. Each LENS combo's
+# decode iters traverse kv_d from il (start) up to il+ol-1 (last iter)
+# — we use il+ol as the upper anchor to bracket the full trajectory.
+LENS_TRAJECTORY_ENDS="69,124,140,250,280,500,560,1000,1110,1990,2210,4000,4400,8050"
+
+# dense.tokens: LENS_ILS ∪ {32} ∪ {1}.
+#   * LENS ils (7) — every prefill iter at LENS's ctx_batch_size=1 visits one
+#   * 32           — every batched decode iter has 32 dense tokens
+#   * 1            — endpoint anchor for small extrapolation; cheap to add
 TOKENS_GRID="1,32,${LENS_ILS}"
 
 # per_sequence.sequences: powers of 2 from 1 to 32.
@@ -95,18 +110,24 @@ SEQUENCES_GRID="${SEQUENCES_GRID:-1,2,4,8,16,32}"
 PREFILL_GRID="${LENS_ILS}"
 KV_PREFILL_GRID="0"
 
-# attn n_decode: powers of 2 to mirror SEQUENCES_GRID. LENS itself only
+# attn n_decode: powers of 2 mirroring SEQUENCES_GRID. LENS itself only
 # exercises n_decode=32, but matching the per_sequence axis keeps the
 # attn batch dim symmetric and lets the simulator score smaller batches
 # without interpolation error. Override with DECODE_N_GRID=32 for strict
 # LENS-only.
 #
-# kv_decode covers the range [min_il=64, max_il+max_ol=8050]. Powers of 2
-# plus LENS-il anchors so interpolation across each combo's il+k decode
-# trajectory is accurate. 8192 is omitted because kv_d+1 must fit in
-# max_position_embeddings (the script auto-skips kd=8192 anyway).
+# kv_decode = LENS_ILS (decode trajectory starts) ∪ LENS_TRAJECTORY_ENDS
+# (decode trajectory endpoints). Each LENS combo's decode integration
+# (sum of attn cost over kv_d=il..il+ol-1) is then bracketed by an
+# anchor at the trajectory start AND the trajectory end — linear interp
+# is exact at the endpoints and (since decode cost ≈ a + b·kv_d, memory
+# bound) accurate at every iter in between.
+#
+# 21 unique kv_d points after sorting:
+#   64, 69, 124, 130, 140, 250, 260, 280, 500, 520, 560,
+#   1000, 1030, 1110, 1990, 2050, 2210, 4000, 4100, 4400, 8050
 DECODE_N_GRID="${DECODE_N_GRID:-1,2,4,8,16,32}"
-KV_DECODE_GRID="${KV_DECODE_GRID:-64,128,256,512,1024,2048,4096,4100,8050}"
+KV_DECODE_GRID="${KV_DECODE_GRID:-${LENS_ILS},${LENS_TRAJECTORY_ENDS}}"
 
 # =============================================================================
 # Execute
@@ -132,12 +153,12 @@ echo "  max_seq_len : $MAX_SEQ_LEN"
 echo "  dtype       : $DTYPE"
 echo "  warmup      : $WARMUP   repeat : $REPEAT   reload-every : $RELOAD_EVERY"
 echo
-echo "  tokens_grid    : $n_tokens points  ($TOKENS_GRID)"
+echo "  tokens_grid    : $n_tokens points  ({1, 32} ∪ LENS_ILS)"
 echo "  sequences_grid : $n_seqs points    ($SEQUENCES_GRID)"
-echo "  prefill_grid   : $n_pc points     (LENS il values)"
+echo "  prefill_grid   : $n_pc points     (LENS il values: $LENS_ILS)"
 echo "  kv_prefill     : $n_kp point      (0 only; chunked prefill disabled)"
-echo "  decode_n_grid  : $n_n point       (32; LENS batch_size)"
-echo "  kv_decode      : $n_kd points     ($KV_DECODE_GRID)"
+echo "  decode_n_grid  : $n_n points     ($DECODE_N_GRID)"
+echo "  kv_decode      : $n_kd points     (LENS_ILS ∪ LENS_TRAJECTORY_ENDS)"
 echo
 echo "  models × TPs:"
 for spec in "${MODEL_TPS[@]}"; do
