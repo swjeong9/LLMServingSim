@@ -50,18 +50,24 @@ from typing import Any, Dict, List, Optional, Tuple
 # Discovery
 # ----------------------------------------------------------------------
 def find_timing_files(path: Path) -> List[Tuple[str, Path]]:
-    """Return [(label, file), ...] for either a JSON file or a directory."""
+    """Return [(label, file), ...] for either a JSON file or a directory.
+
+    Picks up tagged variants like profile_timing_cold.json /
+    profile_timing_hot.json alongside the canonical names.
+    """
     out: List[Tuple[str, Path]] = []
     if path.is_file() and path.suffix == ".json":
         out.append((path.parent.name, path))
         return out
     if path.is_dir():
-        for name in ("profile_timing.json", "validation_timing.json"):
-            f = path / name
-            if f.exists():
-                # Use last 3 components of variant root as label
-                rel = "/".join(path.parts[-3:])
-                out.append((f"{rel}::{name.replace('.json','')}", f))
+        # Glob both tagged + untagged. Sort for deterministic ordering.
+        candidates = sorted(set(
+            list(path.glob("profile_timing*.json"))
+            + list(path.glob("validation_timing*.json"))
+        ))
+        for f in candidates:
+            rel = "/".join(path.parts[-3:])
+            out.append((f"{rel}::{f.stem}", f))
         if not out:
             print(f"[!] no timing JSONs found under {path}", file=sys.stderr)
     return out

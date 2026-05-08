@@ -172,15 +172,32 @@ echo "  max_seq_len  : $MAX_SEQ_LEN"
 echo "  dtype        : $DTYPE"
 echo "  warmup       : $WARMUP   repeat : $REPEAT   reload_every : $RELOAD_EVERY"
 echo
+
+# Auto-detect cache state to choose a default RUN_TAG so cold and hot
+# runs save into separate profile_timing files. User can override via
+# RUN_TAG=<anything>.
 if [[ -d "$NEURON_CACHE_DIR" ]]; then
     cache_size=$(du -sh "$NEURON_CACHE_DIR" 2>/dev/null | cut -f1 || echo "?")
     cache_neffs=$(find "$NEURON_CACHE_DIR" -name "model.neff" 2>/dev/null | wc -l | tr -d ' ')
-    echo "  neuron cache : $NEURON_CACHE_DIR  (${cache_size}, ${cache_neffs} neff)"
-    echo "                 hot cache → compile_us in profile_timing.json ≈ disk reload"
-    echo "                 to measure true compile cost, manually clear:"
-    echo "                   rm -rf $NEURON_CACHE_DIR"
 else
-    echo "  neuron cache : $NEURON_CACHE_DIR  (not present; this run starts cold)"
+    cache_size="0B"
+    cache_neffs=0
+fi
+if [[ "$cache_neffs" -eq 0 ]]; then
+    DETECTED_STATE="cold"
+else
+    DETECTED_STATE="hot"
+fi
+RUN_TAG="${RUN_TAG:-$DETECTED_STATE}"
+
+echo "  neuron cache : $NEURON_CACHE_DIR  (${cache_size}, ${cache_neffs} neff)"
+echo "  detected     : $DETECTED_STATE   →  run_tag : $RUN_TAG"
+echo "  output       : profile_timing_${RUN_TAG}.json (per (model, variant))"
+if [[ "$DETECTED_STATE" = "hot" ]]; then
+    echo "                 hot cache → compile_us ≈ disk reload (not true compile)"
+    echo "                 to measure true compile cost, manually:"
+    echo "                   rm -rf $NEURON_CACHE_DIR"
+    echo "                 then set RUN_TAG=cold (or just rerun — auto-detected)"
 fi
 echo
 echo "  grids (paper grids + scenario tweaks for max_num_seqs=32"
@@ -236,7 +253,8 @@ for spec in "${MODEL_TPS[@]}"; do
         --kv-decode-grid "$KV_DECODE_GRID" \
         --warmup "$WARMUP" \
         --repeat "$REPEAT" \
-        --reload-every "$RELOAD_EVERY"
+        --reload-every "$RELOAD_EVERY" \
+        --run-tag "$RUN_TAG"
 done
 
 echo

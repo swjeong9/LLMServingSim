@@ -837,6 +837,11 @@ def parse_args():
 
     p.add_argument("--skip-attention", action="store_true",
                    help="Write empty attention.csv (debug; speeds up first run)")
+    p.add_argument("--run-tag", default="",
+                   help="Suffix for profile_timing.json (e.g. 'cold', 'hot'). "
+                        "If set, writes profile_timing_<tag>.json — useful when "
+                        "running the same sweep twice (cold cache vs hot cache) "
+                        "and wanting to keep both cost breakdowns side by side.")
     return p.parse_args()
 
 
@@ -1050,10 +1055,13 @@ def main():
     # Save timing artifact (re-loadable for comparison via show_profile_timing.py)
     timing_run["ended_at"] = time.strftime("%Y-%m-%dT%H:%M:%S+00:00", time.gmtime())
     timing_run["wall_clock_total_sec"] = time.perf_counter() - run_t0
-    timing_path = out_root / "profile_timing.json"
+    timing_run["run_tag"] = args.run_tag or None
+    timing_filename = (f"profile_timing_{args.run_tag}.json"
+                       if args.run_tag else "profile_timing.json")
+    timing_path = out_root / timing_filename
     import json as _json
     timing_path.write_text(_json.dumps(timing_run, indent=2, default=str))
-    print(f"[✓] profile_timing.json written ({timing_path}, "
+    print(f"[✓] {timing_filename} written ({timing_path}, "
           f"total {timing_run['wall_clock_total_sec']/60:.1f} min)")
 
     print(f"[✓] Done. Variant root: {out_root}")
