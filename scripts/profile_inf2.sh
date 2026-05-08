@@ -187,7 +187,10 @@ if [[ -d "$NEURON_CACHE_DIR" ]]; then
 else
     echo "  neuron cache : $NEURON_CACHE_DIR  (not present)"
 fi
-if [[ -n "${RUN_TAG:-}" ]]; then
+# Default RUN_TAG to empty string so set -u + later expansions don't blow up.
+# profile_neuron.py treats empty --run-tag as "auto-number".
+RUN_TAG="${RUN_TAG:-}"
+if [[ -n "$RUN_TAG" ]]; then
     echo "  run_tag      : $RUN_TAG (explicit override; profile_timing_${RUN_TAG}.json)"
 else
     echo "  run_tag      : auto (profile_timing_<N>.json — N = first unused integer)"
