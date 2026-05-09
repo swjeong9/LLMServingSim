@@ -267,44 +267,38 @@ cat /tmp/sim_matrix.txt | xargs -n3 -P${PARALLEL} bash -c '
   abs_out=/app/LLMServingSim/${rel_out}
   mkdir -p $(dirname '"${REPO}"'/${rel_out})
 
-  TMPWORK=$(mktemp -d)
-  cp -al '"${REPO}"'/. ${TMPWORK}/        # hardlink — disk 1 copy
-
   docker run --rm \
-    -v ${TMPWORK}:/app/LLMServingSim \
-    -v '"${REPO}"'/studies/inf2_baseline/results:/app/LLMServingSim/studies/inf2_baseline/results \
+    -v '"${REPO}"':/app/LLMServingSim \
+    -v '"${REPO}"'/astra-sim/inputs:/tmp/inputs_template:ro \
+    -v /app/LLMServingSim/astra-sim/inputs \
     -w /app/LLMServingSim \
     llmservingsim:built \
-    bash -c "python -m serving \
-      --cluster-config configs/cluster/inf2_xlarge_llama1b_tp${tp}.json \
-      --dataset studies/inf2_baseline/workloads/${ds}_bs${bs}.jsonl \
-      --output ${rel_out} \
-      --max-num-seqs ${bs} \
-      --no-enable-chunked-prefill \
-      --no-enable-prefix-caching \
-      --max-num-batched-tokens 8192 \
-      --dtype bfloat16 \
-      > ${abs_out%.csv}.log 2>&1"
-
-  rm -rf ${TMPWORK}
+    bash -c "
+      cp -r /tmp/inputs_template/. /app/LLMServingSim/astra-sim/inputs/
+      python -m serving \
+        --cluster-config configs/cluster/inf2_xlarge_llama1b_tp${tp}.json \
+        --dataset studies/inf2_baseline/workloads/${ds}_bs${bs}.jsonl \
+        --output ${rel_out} \
+        --max-num-seqs ${bs} \
+        --no-enable-chunked-prefill \
+        --no-enable-prefix-caching \
+        --max-num-batched-tokens 8192 \
+        --dtype bfloat16 \
+        > ${abs_out%.csv}.log 2>&1
+    "
   echo "[done] tp${tp} bs${bs} ${ds}"
 '
 ```
 
-Mount 정책 — **container 별 host repo 의 hardlink copy** 로 격리:
+Mount 정책:
 
-| Mount | 이유 |
-|---|---|
-| `${TMPWORK}` (host repo 의 task-별 hardlink copy) → `/app/LLMServingSim` | 모든 read-only 부분 (serving/, configs/, profiler/perf/, astra-sim binary) 보임. simulator 가 `astra-sim/inputs/` 에 write 시 hardlink 가 break 되어 새 inode 생성 → host 와 격리, 다른 task 와 격리. |
-| `${REPO}/studies/inf2_baseline/results` → `/app/LLMServingSim/studies/inf2_baseline/results` | 결과 CSV + log 가 호스트 공통 path 로 영구 저장 (각 task 가 unique sub-path 라 충돌 없음). |
+| 디렉토리 | mount 종류 | 이유 |
+|---|---|---|
+| `${REPO}` (호스트 repo 전체) | bind mount → `/app/LLMServingSim` | image 의 mount point 가 빈 dir 라 host 의 serving/, configs/, profiler/perf/, astra-sim binary 등 다 같이 들어와야 함. write 도 허용 (results/ 외에는 simulator 가 write 안 함). |
+| `astra-sim/inputs` | **anonymous volume** (`-v /app/LLMServingSim/astra-sim/inputs`) | container 별 자동 unique volume. host 의 inputs/ 와 무관 — race 해결의 핵심. `--rm` 시 자동 cleanup. |
+| `${REPO}/astra-sim/inputs → /tmp/inputs_template` (ro) | bind ro | host 의 base inputs/ template (system.json 등). config_builder.py 가 read-modify-write 라 시작 시점에 anonymous volume 안에 한 번 cp. anonymous volume 위치(`/app/LLMServingSim/astra-sim/inputs`) 와 다른 path 로 mount 해야 가려지지 않음. |
 
-`cp -al` (hardlink) 가 핵심:
-* 디스크 1 copy 만 사용 — TMPWORK 가 host repo 와 같은 inode 공유
-* `cp` 자체가 메타데이터만 만들어 1초 내 끝남
-* simulator 가 file 을 truncate-write 하면 새 inode → hardlink break → host 와 격리됨
-* container 끝나면 `rm -rf ${TMPWORK}` 로 정리
-
-**Linux only** (macOS 의 `cp -al` 안 됨). CPU instance (Linux) 에서 동작.
+`cp -r /tmp/inputs_template/. .../astra-sim/inputs/` — host 의 base inputs (system.json template + sub-dir 구조) 를 container 별 anonymous volume 에 복사. 이후 simulator 의 read-modify-write 동작 OK + write 는 anonymous volume 안에서만 일어나므로 host 무관 + race 격리 유지.
 
 **Container 시작 overhead** ~2-3 sec / task. 48 × 3 = 2.4 min 추가.
 무시 가능.
