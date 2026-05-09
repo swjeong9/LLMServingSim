@@ -140,10 +140,11 @@ def summarize(rows: List[Dict], label: str):
 
 
 def run_one(model: str, tp: int, bs: int, dataset: str, write_csv: bool,
-            sim_subdir: str = "sim"):
+            sim_subdir: str = "sim", lens_model: str | None = None):
     base = RESULTS
-    nxd_path  = base / "lens_nxd"  / model / f"tp{tp}" / f"bs{bs}" / f"{dataset}.csv"
-    vllm_path = base / "lens_vllm" / model / f"tp{tp}" / f"bs{bs}" / f"{dataset}.csv"
+    lm = lens_model or f"{model}-Instruct"   # measure_*.py uses basename (Instruct included)
+    nxd_path  = base / "lens_nxd"  / lm    / f"tp{tp}" / f"bs{bs}" / f"{dataset}.csv"
+    vllm_path = base / "lens_vllm" / lm    / f"tp{tp}" / f"bs{bs}" / f"{dataset}.csv"
     sim_path  = base / sim_subdir  / model / f"tp{tp}" / f"bs{bs}" / f"{dataset}.csv"
 
     if not sim_path.exists():
@@ -180,6 +181,11 @@ def main():
     p.add_argument("--sim-subdir", default="sim",
                    help="results/<sim-subdir>/<model>/... — use 'parallel_sim' "
                         "if results were collected under a different subtree.")
+    p.add_argument("--lens-model", default=None,
+                   help="LENS measurement folder name (lens_nxd/<this>/...). "
+                        "Default: <model>-Instruct, since measure_*.py uses "
+                        "the model_path basename which carries the -Instruct "
+                        "suffix while the simulator side typically does not.")
     args = p.parse_args()
 
     bsl = [int(x) for x in args.batch_sizes.split(",")]
@@ -188,7 +194,8 @@ def main():
         for bs in bsl:
             run_one(args.model, args.tp, bs, ds,
                     write_csv=not args.no_csv,
-                    sim_subdir=args.sim_subdir)
+                    sim_subdir=args.sim_subdir,
+                    lens_model=args.lens_model)
 
 
 if __name__ == "__main__":
