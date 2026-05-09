@@ -1,18 +1,29 @@
-"""Verify torch_xla.sync() / xm.wait_device_ops() actually wait for
-NeuronCore execution to complete (vs only flushing dispatch).
+"""Verify whether torch_xla.sync() truly waits for device completion.
 
-If sync truly waits:
-  * 1 matmul ≈ 1×T
-  * N matmuls in a single sync window ≈ N×T  (N times longer)
-  * .cpu() readback ≈ 1×T  (forces real device→host completion)
+Improved design (per user feedback): the previous version compared
+single-matmul vs 2-matmul cases, but those are *different NEFF graphs*,
+so the 2-matmul measurement was polluted by NEFF compile / device-load
+time (worsened on EBS-backed instances). This version uses the SAME
+NEFF throughout, with enough warmup that the NEFF is hot in the
+device (no further disk I/O), so measurements isolate per-call work.
 
-If sync only dispatches (the queue keeps draining async):
-  * 1 matmul ≈ tiny (dispatch only)
-  * N matmuls ≈ tiny (just N dispatches)
-  * .cpu() readback ≈ N×T  (ground truth, since CPU read forces wait)
+Three measurement modes, all on the same NEFF:
 
-Run on inf2.xlarge:
-    python scripts/verify_sync.py
+  [A] per-iter sync:        sync(); t0; fn(); sync(); t1   (N iters)
+                            -> mimics profile_neuron.py
+  [B] single sync at end:   t0; for _ in N: fn(); sync(); t1
+                            -> wall/N gives the true per-call device
+                               time, regardless of sync behavior, since
+                               the final sync drains the entire queue
+  [C] per-iter readback:    sync(); t0; fn(); out.item(); t1  (N iters)
+                            -> .item() forces device->host transfer per
+                               call, so this is "forced wait" per call
+
+Decision:
+  if [A] ≈ [B]/N ≈ [C]  : sync() truly waits per call. Profile data OK.
+  if [A] << [B]/N ≈ [C] : sync() does not wait per call. Profile broken.
+  if all three small    : the matmul itself is genuinely fast (Inf2
+                          fast path); not a sync issue.
 """
 import time
 import torch
@@ -31,10 +42,10 @@ def sync():
 def main():
     device = torch_xla.device()
 
-    # 8192^3 × 2 ≈ 1.1 TFLOPs per matmul.
-    # At Inf2 95 TFLOPS/core: 11.6 ms/matmul (single core)
-    # At Inf2 190 TFLOPS dense: 5.8 ms/matmul (both cores)
-    # If sync is broken we'd see microsecond-level numbers.
+    # 8192^3 BF16 matmul = 1.1 TFLOPs.
+    # At Inf2 95 TFLOPS/core BF16 dense: ~11.6 ms expected
+    # At sparse 380 TFLOPS: ~2.9 ms
+    # If we measure < 1 ms with sync(), sync is broken.
     N_LARGE = 8192
     A = torch.randn(N_LARGE, N_LARGE, dtype=torch.bfloat16).to(device)
     B = torch.randn(N_LARGE, N_LARGE, dtype=torch.bfloat16).to(device)
@@ -42,98 +53,90 @@ def main():
     def matmul():
         return A @ B
 
-    # Warm up to compile NEFF
+    # === Compile + warmup ===
+    # Warm up enough to ensure NEFF is loaded into device HBM and the
+    # XLA cache is hot. After this, all calls use the SAME NEFF.
+    print("Compiling NEFF + warmup (10 iters)...")
     sync()
-    print("Compiling NEFF (first call)...")
     t0 = time.perf_counter()
-    out = matmul()
-    sync()
-    print(f"  first call (compile): {(time.perf_counter()-t0)*1000:.1f} ms")
-    del out
-
-    # 2 more warmup
-    for _ in range(2):
-        sync()
+    for _ in range(10):
         out = matmul()
         sync()
         del out
+    print(f"  warmup wall: {(time.perf_counter()-t0)*1000:.1f} ms total")
 
-    # === Test 0: NO sync — pure dispatch latency ===
-    # If our sync()-bracketed measurement equals this, sync is broken
-    # (we'd just be measuring dispatch time both ways).
-    sync()
-    t0 = time.perf_counter()
-    out = matmul()
-    t1 = time.perf_counter()
-    nosync_ms = (t1 - t0) * 1000
-    sync()                          # drain so it doesn't pollute next test
-    del out
-    print(f"\n[0] NO-sync single matmul:        {nosync_ms:8.3f} ms"
-          f"  (pure dispatch baseline)")
+    N = 50
 
-    # === Test 1: single matmul, sync time ===
-    # This mirrors the exact pattern profile_neuron.py uses (l447-461).
-    sync()
-    t0 = time.perf_counter()
-    out = matmul()
-    sync()
-    t1 = time.perf_counter()
-    single_ms = (t1 - t0) * 1000
-    del out
-    print(f"[1] sync()  single matmul:        {single_ms:8.3f} ms"
-          f"  (this is what profile_neuron.py records)")
-
-    # === Test 2: N matmuls in one sync window ===
-    for N in (2, 5, 10):
+    # === [A] per-iter sync (profile_neuron pattern) ===
+    per_iter_samples = []
+    for _ in range(N):
         sync()
         t0 = time.perf_counter()
-        outs = []
-        for _ in range(N):
-            outs.append(matmul())
+        out = matmul()
         sync()
         t1 = time.perf_counter()
-        batch_ms = (t1 - t0) * 1000
-        del outs
-        print(f"[2] sync()  {N:>2} matmuls:       "
-              f"{batch_ms:8.3f} ms total / {batch_ms/N:6.3f} ms each")
+        per_iter_samples.append((t1 - t0) * 1000)
+        del out
+    A_mean = sum(per_iter_samples) / N
+    print(f"\n[A] per-iter sync, N={N}:")
+    print(f"    mean per-call: {A_mean:8.3f} ms")
+    print(f"    total wall:    {sum(per_iter_samples):8.1f} ms")
 
-    # === Test 3: single matmul + 1-element readback (ground truth) ===
-    # Reading just out[0,0] forces the full matmul to complete (the
-    # element can't exist before the kernel is done) but transfers
-    # only 2 bytes — DMA overhead is negligible (vs ~5 ms for a full
-    # 134 MB .cpu() of an 8192² bf16 tensor). So this isolates
-    # device compute time without transfer pollution.
+    # === [B] single sync at end (ground truth: wall/N) ===
     sync()
     t0 = time.perf_counter()
-    out = matmul()
-    val = out.flatten()[0].item()   # 2 B transfer, forced wait
+    outs = []
+    for _ in range(N):
+        outs.append(matmul())
+    sync()
     t1 = time.perf_counter()
-    cpu_ms = (t1 - t0) * 1000
-    print(f"\n[3] item() single matmul:        {cpu_ms:8.3f} ms"
-          f"  (out[0]={val:+.4f}, 2-byte readback)")
+    B_total = (t1 - t0) * 1000
+    B_per_call = B_total / N
+    del outs
+    print(f"\n[B] single sync at end, N={N}:")
+    print(f"    total wall:    {B_total:8.1f} ms")
+    print(f"    per-call:      {B_per_call:8.3f} ms  (= wall / N, ground truth)")
+
+    # === [C] per-iter forced readback ===
+    # Use sum() to reduce to scalar, then item() for transfer (avoids
+    # the .flatten()[0].item() pattern that previously failed to compile).
+    readback_samples = []
+    # Re-warmup with the new graph (sum-reduce) so NEFF for it exists.
+    for _ in range(3):
+        sync()
+        out = matmul()
+        _ = out.sum().item()
+    for _ in range(N):
+        sync()
+        t0 = time.perf_counter()
+        out = matmul()
+        _ = out.sum().item()
+        t1 = time.perf_counter()
+        readback_samples.append((t1 - t0) * 1000)
+    C_mean = sum(readback_samples) / N
+    print(f"\n[C] per-iter readback (sum().item()), N={N}:")
+    print(f"    mean per-call: {C_mean:8.3f} ms")
+    print(f"    (note: NEFF includes the sum reduction, so slightly more work")
+    print(f"     than [A]/[B]; if sync works, [A] ≈ [B]/N anyway.)")
 
     # === Verdict ===
-    # 3-way decision tree:
-    #   [0] no-sync  ≈ pure dispatch / kernel-launch overhead
-    #   [1] sync()   ≈ what profile_neuron.py records
-    #   [3] .cpu()   ≈ ground truth (forced device→host = real wait)
     print(f"\n{'=' * 60}")
-    print(f"  [0] NO-sync : {nosync_ms:8.3f} ms  (dispatch only)")
-    print(f"  [1] sync()  : {single_ms:8.3f} ms  (our profiler pattern)")
-    print(f"  [3] item()  : {cpu_ms:8.3f} ms  (ground truth, no DMA pollution)")
+    print(f"Summary:")
+    print(f"  [A] per-iter sync     : {A_mean:8.3f} ms / call")
+    print(f"  [B] single-sync wall/N: {B_per_call:8.3f} ms / call  (ground truth)")
+    print(f"  [C] forced readback   : {C_mean:8.3f} ms / call")
     print(f"{'=' * 60}")
-    if abs(single_ms - cpu_ms) / max(cpu_ms, 0.01) < 0.30:
-        print(f"VERDICT: sync() ≈ .cpu() → sync() truly waits.")
-        print(f"         profile_neuron.py timings ARE real device latency.")
-        print(f"         Roofline anomalies have a different root cause.")
-    elif abs(single_ms - nosync_ms) / max(nosync_ms, 0.01) < 0.30:
-        print(f"VERDICT: sync() ≈ NO-sync → sync() does NOT wait.")
-        print(f"         All profile_neuron.py timings are dispatch overhead,")
-        print(f"         not real device time. Sweep results are garbage.")
-        print(f"         Fix: use out.cpu() / out.sum().item() to force wait.")
+    ratio_A_to_B = A_mean / max(B_per_call, 1e-6)
+    if ratio_A_to_B > 0.7:
+        print(f"VERDICT: [A] / [B/N] = {ratio_A_to_B:.2f}")
+        print(f"         sync() truly waits per call. profile_neuron is OK.")
+        print(f"         (Roofline anomalies come from elsewhere.)")
     else:
-        print(f"VERDICT: ambiguous. sync() partially waits.")
-        print(f"         Need to investigate further — possibly NEFF-specific.")
+        print(f"VERDICT: [A] / [B/N] = {ratio_A_to_B:.2f}  ← per-iter sync"
+              f" {1/ratio_A_to_B:.0f}x faster than ground truth")
+        print(f"         sync() does NOT wait per call.")
+        print(f"         profile_neuron measurements are dispatch overhead,")
+        print(f"         not real device time. Need NTFF-based timing.")
 
 
 if __name__ == "__main__":
