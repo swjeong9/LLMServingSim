@@ -123,8 +123,8 @@ artifact 섹션 참고). 두 TP 모두 fair 측정 가능. TP=2 가 inf2.xlarge
 source /opt/aws_neuronx_venv_pytorch_2_9_nxd_inference/bin/activate
 
 # 1) TP=2 — fair comparison
-for ds in arxiv cnn sharegpt writing_prompts; do
-  for bs in 1 2 4 8 16 32; do
+for bs in 1 2 4 8 16 32; do
+  for ds in arxiv cnn sharegpt writing_prompts; do
     python studies/inf2_baseline/measure_nxd.py \
         --dataset ${ds} --batch-size ${bs} \
         --model ~/models/Llama-3.2-1B-Instruct \
@@ -134,8 +134,8 @@ for ds in arxiv cnn sharegpt writing_prompts; do
 done
 
 # 2) TP=1 — warning 출력되지만 실제 GQA 동작 (위 issue #1289 참고)
-for ds in arxiv cnn sharegpt writing_prompts; do
-  for bs in 1 2 4 8 16 32; do
+for bs in 1 2 4 8 16 32; do
+  for ds in arxiv cnn sharegpt writing_prompts; do
     python studies/inf2_baseline/measure_nxd.py \
         --dataset ${ds} --batch-size ${bs} \
         --model ~/models/Llama-3.2-1B-Instruct \
@@ -156,8 +156,8 @@ CONVERT_TO_MHA 가 TP=1 에서 발동될 가능성 — 측정 시 warning 확인
 source /opt/aws_neuronx_venv_<vllm-capable>/bin/activate
 
 # 1) TP=2
-for ds in arxiv cnn sharegpt writing_prompts; do
-  for bs in 1 2 4 8 16 32; do
+for bs in 1 2 4 8 16 32; do
+  for ds in arxiv cnn sharegpt writing_prompts; do
     python studies/inf2_baseline/measure_vllm.py \
         --dataset ${ds} --batch-size ${bs} \
         --model ~/models/Llama-3.2-1B-Instruct \
@@ -167,8 +167,8 @@ for ds in arxiv cnn sharegpt writing_prompts; do
 done
 
 # 2) TP=1 (NxDI warning 무시 OK — issue #1289 참고)
-for ds in arxiv cnn sharegpt writing_prompts; do
-  for bs in 1 2 4 8 16 32; do
+for bs in 1 2 4 8 16 32; do
+  for ds in arxiv cnn sharegpt writing_prompts; do
     python studies/inf2_baseline/measure_vllm.py \
         --dataset ${ds} --batch-size ${bs} \
         --model ~/models/Llama-3.2-1B-Instruct \
