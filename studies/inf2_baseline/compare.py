@@ -91,10 +91,18 @@ def load_sim(path: Path, batch_size: int) -> Tuple[List[Dict], float]:
         chunk = rows[i:i + batch_size]
         if len(chunk) < batch_size:
             break
+        # Subtract queuing_delay so per-batch e2e is pure processing
+        # time of that batch — comparable to LENS NxD's batch_e2e_ms
+        # (each NxD batch starts fresh from 0, queueing-free). Without
+        # this, sim's `latency` accumulates wait time for queued reqs
+        # at small batch sizes, blowing up the per-batch error to
+        # thousands of percent.
+        def proc(r):
+            return (float(r["latency"]) - float(r["queuing_delay"])) / 1e6
         batches.append({
             "batch_id":   i // batch_size,
-            "batch_ttft": max(float(r["TTFT"])    / 1e6 for r in chunk),
-            "batch_e2e":  max(float(r["latency"]) / 1e6 for r in chunk),
+            "batch_ttft": max(float(r["TTFT"]) / 1e6 for r in chunk),
+            "batch_e2e":  max(proc(r) for r in chunk),
         })
     return batches, total_ms
 
