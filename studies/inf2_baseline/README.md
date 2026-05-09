@@ -270,7 +270,7 @@ cat /tmp/sim_matrix.txt | xargs -n3 -P${PARALLEL} bash -c '
   docker run --rm \
     -v '"${REPO}"':/app/LLMServingSim \
     -v /app/LLMServingSim/astra-sim/inputs \
-    -w /app/LLMServingSim/astra-sim \
+    -w /app/LLMServingSim \
     llmservingsim:built \
     bash -c "
       mkdir -p /app/LLMServingSim/astra-sim/inputs/{network,system,memory,trace,workload}
