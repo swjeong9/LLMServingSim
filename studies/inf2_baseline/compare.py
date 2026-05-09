@@ -28,7 +28,7 @@ import argparse
 import csv
 import statistics
 from pathlib import Path
-from typing import Dict, List
+from typing import Dict, List, Tuple
 
 
 STUDY_ROOT = Path(__file__).resolve().parent
@@ -65,13 +65,27 @@ def load_lens(path: Path) -> List[Dict]:
     return out
 
 
-def load_sim(path: Path, batch_size: int) -> List[Dict]:
-    """Parse LLMServingSim per-request CSV and group every B consecutive
-    requests into one batch. Sim emits ns; convert to ms.
+def load_sim(path: Path, batch_size: int) -> Tuple[List[Dict], float]:
+    """Parse LLMServingSim per-request CSV. Returns (per_batch_rows, total_ms).
+
+    Sim emits ns; convert to ms.
+
+    * total_ms = max(end_time) - min(arrival): wall time to process all
+      requests (the headline number — equivalent to LENS's sum-of-batches
+      under sequential batches, and to vLLM's overall sweep time under
+      continuous batching).
+    * per-batch rows are an analytical view: chunk every batch_size
+      consecutive requests (arrival order) and report per-chunk
+      max(latency), max(TTFT). Useful for inspection but not for the
+      headline error since chunk boundaries don't line up with vLLM's
+      actual batching.
     """
-    rows = []
     with path.open() as f:
         rows = list(csv.DictReader(f))
+    arrivals  = [int(r["arrival"])  for r in rows]
+    end_times = [int(r["end_time"]) for r in rows]
+    total_ms = (max(end_times) - min(arrivals)) / 1e6
+
     batches = []
     for i in range(0, len(rows), batch_size):
         chunk = rows[i:i + batch_size]
@@ -82,7 +96,18 @@ def load_sim(path: Path, batch_size: int) -> List[Dict]:
             "batch_ttft": max(float(r["TTFT"])    / 1e6 for r in chunk),
             "batch_e2e":  max(float(r["latency"]) / 1e6 for r in chunk),
         })
-    return batches
+    return batches, total_ms
+
+
+def lens_total_ms(rows: List[Dict]) -> float:
+    """LENS sweep is 50 sequential batches per measurement file →
+    sum of per-batch e2e is the total time to process all requests.
+    Average across replicate runs (n_runs) per batch_id first so we
+    don't double-count when LENS recorded n_runs > 1."""
+    by_batch: Dict[int, List[float]] = {}
+    for r in rows:
+        by_batch.setdefault(r["batch_id"], []).append(r["batch_e2e"])
+    return sum(statistics.fmean(v) for v in by_batch.values())
 
 
 def join_3way(lens_nxd, lens_vllm, sim) -> List[Dict]:
@@ -118,25 +143,42 @@ def join_3way(lens_nxd, lens_vllm, sim) -> List[Dict]:
     return rows
 
 
-def summarize(rows: List[Dict], label: str):
-    """Print mean/median/p95 abs error of sim vs each ground truth."""
+def summarize(rows: List[Dict], totals: Dict[str, float], label: str):
+    """Print TOTAL (headline) + per-batch error stats of sim vs each ref."""
     def err_pct(s, g):
         if g is None or g == 0:
             return None
         return abs(s - g) / g * 100
 
     print(f"\n=== {label}  (n_batches={len(rows)}) ===")
+
+    # Headline: TOTAL time to process all requests.
+    sim_total = totals["sim"]
+    print(f"  TOTAL e2e (all-reqs wall time, ms):")
+    print(f"    sim   = {sim_total:>10.1f}")
     for ref in ("nxd", "vllm"):
-        for metric in ("e2e", "ttft"):
-            errs = [err_pct(r[f"sim_{metric}"], r[f"{ref}_{metric}"])
-                    for r in rows]
-            errs = [e for e in errs if e is not None]
-            if not errs:
-                continue
-            print(f"  sim vs {ref:<4} {metric:<4}  "
-                  f"mean={statistics.fmean(errs):6.2f}%  "
-                  f"median={statistics.median(errs):6.2f}%  "
-                  f"p95={sorted(errs)[int(0.95*len(errs))]:6.2f}%")
+        rt = totals.get(ref)
+        if rt is None:
+            continue
+        err = err_pct(sim_total, rt)
+        sign = "+" if sim_total >= rt else "-"
+        print(f"    {ref:<5} = {rt:>10.1f}    sim/{ref} err = "
+              f"{sign}{err:5.2f}%  (sim {'over' if sim_total>rt else 'under'})")
+
+    # Analytical: per-batch distribution.
+    if rows:
+        print(f"  per-batch (analytical):")
+        for ref in ("nxd", "vllm"):
+            for metric in ("e2e", "ttft"):
+                errs = [err_pct(r[f"sim_{metric}"], r[f"{ref}_{metric}"])
+                        for r in rows]
+                errs = [e for e in errs if e is not None]
+                if not errs:
+                    continue
+                print(f"    sim vs {ref:<4} {metric:<4}  "
+                      f"mean={statistics.fmean(errs):6.2f}%  "
+                      f"median={statistics.median(errs):6.2f}%  "
+                      f"p95={sorted(errs)[int(0.95*len(errs))]:6.2f}%")
 
 
 def run_one(model: str, tp: int, bs: int, dataset: str, write_csv: bool,
@@ -152,19 +194,33 @@ def run_one(model: str, tp: int, bs: int, dataset: str, write_csv: bool,
         return None
     nxd  = load_lens(nxd_path)  if nxd_path.exists()  else []
     vllm = load_lens(vllm_path) if vllm_path.exists() else []
-    sim  = load_sim(sim_path, bs)
+    sim, sim_total = load_sim(sim_path, bs)
     if not (nxd or vllm):
         print(f"[warn] no ground truth for {dataset} tp{tp} bs{bs}")
 
+    totals = {"sim": sim_total}
+    if nxd:  totals["nxd"]  = lens_total_ms(nxd)
+    if vllm: totals["vllm"] = lens_total_ms(vllm)
+
     rows = join_3way(nxd, vllm, sim)
-    summarize(rows, f"{dataset}  tp={tp}  bs={bs}")
+    summarize(rows, totals, f"{dataset}  tp={tp}  bs={bs}")
 
     if write_csv:
         out = STUDY_ROOT / "comparison" / f"{model}_tp{tp}_bs{bs}_{dataset}.csv"
         out.parent.mkdir(parents=True, exist_ok=True)
         with out.open("w", newline="") as f:
-            w = csv.DictWriter(f, fieldnames=list(rows[0].keys()))
+            # First row: TOTAL (headline). Then per-batch rows.
+            fieldnames = ["batch_id", "sim_e2e", "nxd_e2e", "vllm_e2e",
+                          "sim_ttft", "nxd_ttft", "vllm_ttft"]
+            w = csv.DictWriter(f, fieldnames=fieldnames)
             w.writeheader()
+            w.writerow({
+                "batch_id": "TOTAL",
+                "sim_e2e":  totals["sim"],
+                "nxd_e2e":  totals.get("nxd",  ""),
+                "vllm_e2e": totals.get("vllm", ""),
+                "sim_ttft": "", "nxd_ttft": "", "vllm_ttft": "",
+            })
             w.writerows(rows)
         print(f"  → {out}")
     return rows
