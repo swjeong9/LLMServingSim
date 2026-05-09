@@ -110,11 +110,23 @@ def init_llm(model, tp_degree, batch_size, max_model_len, compiled_dir):
                 "save_sharded_checkpoint": True,
                 "context_encoding_buckets": buckets,
                 "token_generation_buckets": buckets,
-                # Don't override flash_decoding_enabled here — empirically,
+                # Force native PyTorch attention path — same fix as
+                # measure_nxd.py. NxDI's NKI attention_cte kernel
+                # crashes the compiler verifier (checkDMATranspose,
+                # SB->HBM only) on large prefill buckets at
+                # TP<num_kv_heads. Disabling all NKI attention paths
+                # keeps the compile alive at the cost of slower
+                # attention. Trade-off: not LENS-NKI-fair, but vLLM
+                # itself runs through the same NeuronConfig so the
+                # comparison stays apples-to-apples between our
+                # NxD-direct and vLLM measurements.
+                "attn_kernel_enabled": False,
+                "attn_block_cte_nki_kernel_enabled": False,
+                "qkv_kernel_enabled": False,
+                # flash_decoding_enabled intentionally NOT pinned —
                 # explicit False triggers a different attention_cte
-                # codepath that crashes the compiler verifier on large
-                # buckets at TP<num_kv_heads (see measure_nxd.py).
-                # LENS's run_profiling_vllm.py also leaves it unset.
+                # codepath that hits the same verifier crash. Let
+                # NxDI auto-decide (default None).
             },
         },
     )

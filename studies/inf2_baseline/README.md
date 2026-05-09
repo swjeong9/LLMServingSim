@@ -64,6 +64,23 @@ python studies/inf2_baseline/convert_workload.py --all
 `results/lens_{nxd,vllm}/<model>/tp<N>/bs<B>/<dataset>_<ts>.csv` 로 저장
 (stable symlink `<dataset>.csv` 가 항상 최신 결과 가리킴).
 
+#### 2.a-pre. 모델 사전 다운로드 (`--model` 은 local path 권장)
+
+NxDI 의 `model.load()` 가 weight 가져올 때 model_path 끝에 `/` 가
+붙으면서 HF Hub repo id validator (`HFValidationError: Repo id must
+be in the form 'repo_name' or 'namespace/repo_name'`) 에 거부됨.
+LENS 도 같은 이유로 local path (`/home/ubuntu/models/...`) 사용.
+
+```bash
+mkdir -p ~/models
+huggingface-cli download meta-llama/Llama-3.2-1B-Instruct \
+    --local-dir ~/models/Llama-3.2-1B-Instruct
+# (HF_TOKEN 필요 시: export HF_TOKEN=...)
+```
+
+이후 `--model ~/models/Llama-3.2-1B-Instruct` 형태로 호출.
+vLLM 도 동일 local path 받음.
+
 #### 2.a. venv 선택
 
 AWS Neuron DLAMI 는 여러 venv 를 `/opt/aws_neuronx_venv_*` 에 미리 설치.
@@ -111,7 +128,7 @@ for ds in arxiv cnn sharegpt writing_prompts; do
   for bs in 1 2 4 8 16 32; do
     python studies/inf2_baseline/measure_nxd.py \
         --dataset ${ds} --batch-size ${bs} \
-        --model meta-llama/Llama-3.2-1B-Instruct \
+        --model ~/models/Llama-3.2-1B-Instruct \
         --tp-degree 2 --max-model-len 8192 \
         --compiled-dir /home/ubuntu/compiled_models_inf2_baseline_nxd
   done
@@ -122,7 +139,7 @@ for ds in arxiv cnn sharegpt writing_prompts; do
   for bs in 1 2 4 8 16 32; do
     python studies/inf2_baseline/measure_nxd.py \
         --dataset ${ds} --batch-size ${bs} \
-        --model meta-llama/Llama-3.2-1B-Instruct \
+        --model ~/models/Llama-3.2-1B-Instruct \
         --tp-degree 1 --max-model-len 8192 \
         --compiled-dir /home/ubuntu/compiled_models_inf2_baseline_nxd_tp1
   done
@@ -144,7 +161,7 @@ for ds in arxiv cnn sharegpt writing_prompts; do
   for bs in 1 2 4 8 16 32; do
     python studies/inf2_baseline/measure_vllm.py \
         --dataset ${ds} --batch-size ${bs} \
-        --model meta-llama/Llama-3.2-1B-Instruct \
+        --model ~/models/Llama-3.2-1B-Instruct \
         --tp-degree 2 --max-model-len 8192 \
         --compiled-dir /home/ubuntu/compiled_models_inf2_baseline_vllm
   done
@@ -155,7 +172,7 @@ for ds in arxiv cnn sharegpt writing_prompts; do
   for bs in 1 2 4 8 16 32; do
     python studies/inf2_baseline/measure_vllm.py \
         --dataset ${ds} --batch-size ${bs} \
-        --model meta-llama/Llama-3.2-1B-Instruct \
+        --model ~/models/Llama-3.2-1B-Instruct \
         --tp-degree 1 --max-model-len 8192 \
         --compiled-dir /home/ubuntu/compiled_models_inf2_baseline_vllm_tp1
   done
@@ -171,11 +188,14 @@ OOM 또는 too-long 의 경우 자동 skip / ERROR 행으로 기록.
 #### 2.d. 빠른 sanity check
 
 ```bash
-# venv 활성화된 상태에서. 짧은 prompt 가 많은 cnn 으로 + TP=2 (fair).
+# venv 활성화 + 모델 local 다운로드된 상태에서.
 python studies/inf2_baseline/measure_nxd.py --dataset cnn --batch-size 1 \
-    --model meta-llama/Llama-3.2-1B-Instruct --tp-degree 2 \
+    --model ~/models/Llama-3.2-1B-Instruct --tp-degree 1 \
     --max-runs 3 --skip-warmup
 ```
+
+NxDI compile 약 4분 걸림 (NKI bypass 한 native attention path).
+이후 cache hit 으로 빠름.
 
 ### 3. Simulator 실행 (로컬 docker)
 
@@ -244,12 +264,24 @@ python studies/inf2_baseline/compare.py --tp 2 --batch-sizes 1,2,4,8,16,32
 
 * **NxDI warning "TP degree (X) and KV heads (8) are not divisible.
   Overriding attention sharding strategy to GQA.CONVERT_TO_MHA"**:
-  무시 OK. AWS 가 [aws-neuron-sdk #1289](https://github.com/aws-neuron/aws-neuron-sdk/issues/1289)
-  에서 인정한 mislabel — `determine_sharding_strategy()` 의 label
-  자체는 잘못 찍히지만 실제 runtime 의 attention 은 `get_shardable_head_counts()`
+  label 만 mislabel (AWS 가 [aws-neuron-sdk #1289](https://github.com/aws-neuron/aws-neuron-sdk/issues/1289)
+  에서 인정). 실제 runtime 의 attention 은 `get_shardable_head_counts()`
   의 looser 조건 (`kv < tp` or `kv % tp != 0`) 만 보고 head 수 결정하므로
-  TP=1/2 + KV=8 모두 진짜 GQA 그대로 동작 (TP=1: Q=32, KV=8 / TP=2:
-  Q=16, KV=4 per rank). 단 **`flash_decoding_enabled=True` + tp<kv** 일
-  때만 진짜 crash → measure_nxd.py 가 `flash_decoding_enabled=False`
-  로 명시 (default 도 False). vLLM-Neuron 도 동일 logic 인지 vllm 측정
-  warning + flash_decoding 옵션 확인.
+  TP=1/2 + KV=8 모두 진짜 GQA (TP=1: Q=32, KV=8 / TP=2: Q=16, KV=4 per
+  rank). 무시 OK.
+
+* **NKI attention_cte kernel bypass — `attn_kernel_enabled=False`**:
+  inf2.xlarge + Llama-3.2-1B + TP < KV (즉 TP=1, 2) + max_model_len
+  ≥ 4096 조합에서 NxDI 의 NKI `attention_cte` kernel 이
+  compiler verifier 의 `checkDMATranspose` 에 걸림 ("transpose only
+  supported for HBM->SB"). 이 stack 의 public report 0건 (LENS 도
+  TP≥8 / inf2.24xlarge+ 에서만 NxD-direct 검증). 우리는
+  `measure_nxd.py` / `measure_vllm.py` 에 `attn_kernel_enabled=False`
+  + `attn_block_cte_nki_kernel_enabled=False` + `qkv_kernel_enabled=False`
+  강제로 NKI 우회 → native PyTorch attention path 사용. compile 통과,
+  결과 numerical 동등, 속도만 NKI 보다 느림.
+
+  **Trade-off**: LENS 의 NKI-on reference 측정 (TP=8, inf2.24xlarge+)
+  과는 framework path 다름. 우리 inf2.xlarge 측정 셋 (NxD + vLLM) 은
+  내부 self-consistent — 둘 다 NKI off 라 두 측정 직접 비교 + 시뮬레이터
+  비교는 fair. LENS reference 는 framework note 로만 reuse.
