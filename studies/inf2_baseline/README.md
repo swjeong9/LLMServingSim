@@ -232,6 +232,13 @@ docker commit <container_name> llmservingsim:built
 전체 sweep matrix = 4 datasets × 6 batches × 2 TPs = **48 runs**. 단일
 container 시퀀셜 1-2 일, 8-way 병렬이면 ~6시간, 16-way 면 ~3시간.
 
+> **사전 조건** — host 에서 workload jsonl 생성:
+> ```bash
+> python studies/inf2_baseline/convert_workload.py --all
+> # → studies/inf2_baseline/workloads/{ds}_bs{N}.jsonl 24개
+> ```
+> jsonl 은 .gitignore 라 git clone 후 자동 안 만들어짐. sweep 전 1초.
+
 각 task 마다 `docker run --rm` 으로 fresh container 띄움. container 별
 writable layer 가 격리되므로 `astra-sim/inputs/` race condition 없음.
 `workloads/`, `configs/`, `profiler/perf/` 는 read-only mount (input),
