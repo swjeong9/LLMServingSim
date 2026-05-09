@@ -58,7 +58,21 @@ def main():
         sync()
         del out
 
+    # === Test 0: NO sync — pure dispatch latency ===
+    # If our sync()-bracketed measurement equals this, sync is broken
+    # (we'd just be measuring dispatch time both ways).
+    sync()
+    t0 = time.perf_counter()
+    out = matmul()
+    t1 = time.perf_counter()
+    nosync_ms = (t1 - t0) * 1000
+    sync()                          # drain so it doesn't pollute next test
+    del out
+    print(f"\n[0] NO-sync single matmul:        {nosync_ms:8.3f} ms"
+          f"  (pure dispatch baseline)")
+
     # === Test 1: single matmul, sync time ===
+    # This mirrors the exact pattern profile_neuron.py uses (l447-461).
     sync()
     t0 = time.perf_counter()
     out = matmul()
@@ -66,7 +80,8 @@ def main():
     t1 = time.perf_counter()
     single_ms = (t1 - t0) * 1000
     del out
-    print(f"\n[1] sync()  single matmul:        {single_ms:8.3f} ms")
+    print(f"[1] sync()  single matmul:        {single_ms:8.3f} ms"
+          f"  (this is what profile_neuron.py records)")
 
     # === Test 2: N matmuls in one sync window ===
     for N in (2, 5, 10):
@@ -95,16 +110,27 @@ def main():
           f"  (result[0,0]={result[0,0].item():+.4f})")
 
     # === Verdict ===
-    print(f"\n{'=' * 50}")
+    # 3-way decision tree:
+    #   [0] no-sync  ≈ pure dispatch / kernel-launch overhead
+    #   [1] sync()   ≈ what profile_neuron.py records
+    #   [3] .cpu()   ≈ ground truth (forced device→host = real wait)
+    print(f"\n{'=' * 60}")
+    print(f"  [0] NO-sync : {nosync_ms:8.3f} ms  (dispatch only)")
+    print(f"  [1] sync()  : {single_ms:8.3f} ms  (our profiler pattern)")
+    print(f"  [3] .cpu()  : {cpu_ms:8.3f} ms  (ground truth)")
+    print(f"{'=' * 60}")
     if abs(single_ms - cpu_ms) / max(cpu_ms, 0.01) < 0.30:
-        print(f"VERDICT: sync() ≈ .cpu() (within 30%) → sync() truly waits")
-        print(f"         Profile timings ARE real device latency.")
+        print(f"VERDICT: sync() ≈ .cpu() → sync() truly waits.")
+        print(f"         profile_neuron.py timings ARE real device latency.")
+        print(f"         Roofline anomalies have a different root cause.")
+    elif abs(single_ms - nosync_ms) / max(nosync_ms, 0.01) < 0.30:
+        print(f"VERDICT: sync() ≈ NO-sync → sync() does NOT wait.")
+        print(f"         All profile_neuron.py timings are dispatch overhead,")
+        print(f"         not real device time. Sweep results are garbage.")
+        print(f"         Fix: use out.cpu() / out.sum().item() to force wait.")
     else:
-        print(f"VERDICT: sync()={single_ms:.2f}ms vs .cpu()={cpu_ms:.2f}ms"
-              f"  ({cpu_ms/max(single_ms,0.01):.1f}x diff)")
-        print(f"         sync() does NOT actually wait for device.")
-        print(f"         All previous profile timings are dispatch-only,"
-              f" not real device time.")
+        print(f"VERDICT: ambiguous. sync() partially waits.")
+        print(f"         Need to investigate further — possibly NEFF-specific.")
 
 
 if __name__ == "__main__":
