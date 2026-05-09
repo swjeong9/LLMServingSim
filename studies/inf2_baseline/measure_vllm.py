@@ -38,6 +38,7 @@ from pathlib import Path
 NEURON_BUCKETS = [128, 256, 512, 1024, 2048, 4096, 8192]
 WARMUP_SHAPES = [(64, 5), (130, 10), (260, 20), (520, 40),
                  (1030, 80), (2050, 160), (4100, 300)]
+NUM_BATCHES = 50
 
 STUDY_ROOT = Path(__file__).resolve().parent
 DATA_DIR = STUDY_ROOT / "data" / "datasets"
@@ -62,15 +63,26 @@ def _buckets_for(max_model_len: int):
     return bs
 
 
-def load_dataset_csv(path: Path):
-    runs = defaultdict(list)
+def load_dataset_csv(path: Path, batch_size: int):
+    """Take top batch_size * NUM_BATCHES rows in source order, re-group
+    into NUM_BATCHES batches of batch_size each. The dataset CSV's own
+    run_id is bs32-anchored — ignored so the same workload rows are
+    reused across batch sizes (sweep reproducibility)."""
+    n_reqs = batch_size * NUM_BATCHES
     with path.open() as f:
-        for r in csv.DictReader(f):
-            runs[int(r["run_id"])].append({
-                "sample_id":  int(r["sample_id"]),
-                "input_len":  int(r["input_len"]),
-                "output_len": int(r["output_len"]),
-            })
+        rows = list(csv.DictReader(f))[:n_reqs]
+    if len(rows) < n_reqs:
+        raise ValueError(
+            f"{path.name}: need {n_reqs} rows ({batch_size} × {NUM_BATCHES}), "
+            f"have {len(rows)}")
+    runs = {}
+    for i in range(NUM_BATCHES):
+        chunk = rows[i * batch_size:(i + 1) * batch_size]
+        runs[i] = [{
+            "sample_id":  int(r["sample_id"]),
+            "input_len":  int(r["input_len"]),
+            "output_len": int(r["output_len"]),
+        } for r in chunk]
     return runs
 
 
@@ -213,16 +225,17 @@ def main():
     out_dir.mkdir(parents=True, exist_ok=True)
     print(f"[output] {out_dir}")
 
-    runs = load_dataset_csv(src_csv)
+    try:
+        runs = load_dataset_csv(src_csv, args.batch_size)
+    except ValueError as e:
+        print(f"[skip] {e}")
+        return
     if args.max_runs is not None:
         keep = sorted(runs)[:args.max_runs]
         runs = {k: runs[k] for k in keep}
     n_runs = len(runs)
-    print(f"[{datetime.now()}] loaded {n_runs} runs from {src_csv}")
-    for rid, samples in runs.items():
-        if len(samples) != args.batch_size:
-            raise ValueError(f"run {rid}: {len(samples)} samples, "
-                             f"expected batch_size={args.batch_size}")
+    print(f"[{datetime.now()}] loaded {n_runs} runs (batch={args.batch_size}) "
+          f"from {src_csv}")
 
     llm = init_llm(args.model, args.tp_degree, args.batch_size,
                    args.max_model_len, args.compiled_dir)
