@@ -102,13 +102,24 @@ RELOAD_EVERY="${RELOAD_EVERY:-0}"        # 0 = NEVER reload mid-sweep.
 # cache is hot, compile_us reads near-zero (only disk reload).
 NEURON_CACHE_DIR="${NEURON_CACHE_DIR:-/var/tmp/neuron-compile-cache}"
 
-# Three target models. Comment out to skip.
-# Format: "model_id|tp_csv"
-MODEL_TPS=(
-    "meta-llama/Llama-3.2-1B|1,2,4,8"
-    "mistralai/Mistral-7B-v0.3|1,2,4,8"
-    "Qwen/Qwen3-14B|2,4,8"               # TP=1 OOM at full 30 GB; skip
-)
+# Three target models. Comment out to skip, or override the whole list
+# from the environment with a colon-separated string:
+#
+#   MODEL_TPS_OVERRIDE="meta-llama/Llama-3.2-1B|1" ./scripts/profile_inf2.sh
+#   MODEL_TPS_OVERRIDE="meta-llama/Llama-3.2-1B|1,2:mistralai/Mistral-7B-v0.3|2" \
+#       ./scripts/profile_inf2.sh
+#
+# Useful for inf2.xlarge (TP<=2) validation runs without editing the file.
+# Format per entry: "model_id|tp_csv". Entries separated by ':'.
+if [[ -n "${MODEL_TPS_OVERRIDE:-}" ]]; then
+    IFS=':' read -ra MODEL_TPS <<<"$MODEL_TPS_OVERRIDE"
+else
+    MODEL_TPS=(
+        "meta-llama/Llama-3.2-1B|1,2,4,8"
+        "mistralai/Mistral-7B-v0.3|1,2,4,8"
+        "Qwen/Qwen3-14B|2,4,8"               # TP=1 OOM at full 30 GB; skip
+    )
+fi
 
 # =============================================================================
 # Paper grids (extracted from RTXPRO6000/Llama-3.1-8B/bf16/tp1)
