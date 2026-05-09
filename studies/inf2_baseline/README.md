@@ -252,12 +252,42 @@ cat /tmp/sim_matrix.txt | xargs -n3 -P${PARALLEL} bash -c '
     --no-enable-prefix-caching \
     --max-num-batched-tokens 8192 \
     --dtype bfloat16 \
-    > /tmp/sim_${tp}_${bs}_${ds}.log 2>&1
+    > ${out%.csv}.log 2>&1
   echo "[done] tp${tp} bs${bs} ${ds}"
 '
 ```
 
-병렬 실행 진행 상황은 `tail -f /tmp/sim_*.log` 로 모니터.
+진행 상황 모니터:
+```bash
+tail -f studies/inf2_baseline/results/sim/Llama-3.2-1B/tp*/bs*/*.log
+```
+
+각 sim run 의 stdout/stderr 가 결과 CSV 옆에 `<dataset>.log` 로
+같이 저장됨. scp 로 가져올 때 결과 CSV + log 가 한 번에 따라옴.
+
+#### 3.c. (CPU 인스턴스가 별도면) 결과 transfer 로 가져오기
+
+CPU 인스턴스에서 sweep 끝났으면 로컬로 가져와서 비교 진행:
+
+```bash
+# 로컬 (Mac) 에서
+scp -r ubuntu@cpu-instance:~/LLMServingSim/studies/inf2_baseline/results/sim/ \
+       studies/inf2_baseline/results/sim/
+
+# 또는 sync (이미 일부 있는 경우)
+rsync -av --progress \
+    ubuntu@cpu-instance:~/LLMServingSim/studies/inf2_baseline/results/sim/ \
+    studies/inf2_baseline/results/sim/
+```
+
+CSV + `.log` 둘 다 같은 트리에 들어옴. 로그가 의미 있어 보이면
+나중에 S3 archiving 으로:
+
+```bash
+# S3 bucket 에 backup (선택적, 추후)
+aws s3 sync studies/inf2_baseline/results/ \
+    s3://<bucket>/inf2_baseline/results/$(date +%Y%m%d)/
+```
 
 `--max-num-batched-tokens 8192` 는 LENS 의 max_model_len 와 일치
 시키기 위함 (default 2048 면 큰 prompt 가 chunked prefill 처럼 여러
