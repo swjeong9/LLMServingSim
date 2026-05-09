@@ -268,33 +268,35 @@ cat /tmp/sim_matrix.txt | xargs -n3 -P${PARALLEL} bash -c '
   mkdir -p $(dirname '"${REPO}"'/${rel_out})
 
   docker run --rm \
-    -v '"${REPO}"'/studies/inf2_baseline/workloads:/app/LLMServingSim/studies/inf2_baseline/workloads:ro \
-    -v '"${REPO}"'/studies/inf2_baseline/results:/app/LLMServingSim/studies/inf2_baseline/results \
-    -v '"${REPO}"'/configs:/app/LLMServingSim/configs:ro \
-    -v '"${REPO}"'/profiler/perf:/app/LLMServingSim/profiler/perf:ro \
+    -v '"${REPO}"':/app/LLMServingSim \
+    -v /app/LLMServingSim/astra-sim/inputs \
     -w /app/LLMServingSim/astra-sim \
     llmservingsim:built \
-    bash -c "python -m serving \
-      --cluster-config configs/cluster/inf2_xlarge_llama1b_tp${tp}.json \
-      --dataset studies/inf2_baseline/workloads/${ds}_bs${bs}.jsonl \
-      --output ${rel_out} \
-      --max-num-seqs ${bs} \
-      --no-enable-chunked-prefill \
-      --no-enable-prefix-caching \
-      --max-num-batched-tokens 8192 \
-      --dtype bfloat16 \
-      > ${abs_out%.csv}.log 2>&1"
+    bash -c "
+      mkdir -p /app/LLMServingSim/astra-sim/inputs/{network,system,memory,trace,workload}
+      python -m serving \
+        --cluster-config configs/cluster/inf2_xlarge_llama1b_tp${tp}.json \
+        --dataset studies/inf2_baseline/workloads/${ds}_bs${bs}.jsonl \
+        --output ${rel_out} \
+        --max-num-seqs ${bs} \
+        --no-enable-chunked-prefill \
+        --no-enable-prefix-caching \
+        --max-num-batched-tokens 8192 \
+        --dtype bfloat16 \
+        > ${abs_out%.csv}.log 2>&1
+    "
   echo "[done] tp${tp} bs${bs} ${ds}"
 '
 ```
 
-| 디렉토리 mount | mode | 이유 |
+Mount 정책:
+
+| 디렉토리 | mount 종류 | 이유 |
 |---|---|---|
-| `studies/inf2_baseline/workloads` | ro | 입력 — 모든 container 가 read |
-| `studies/inf2_baseline/results` | rw | 출력 — 각 container 가 unique path 에 write |
-| `configs` | ro | cluster config — read |
-| `profiler/perf` | ro | profile bundle — read |
-| `astra-sim/inputs` | **mount 안 함** | race 해결의 핵심 — 각 container 자체 layer |
+| `${REPO}` (호스트 repo 전체) | bind mount → `/app/LLMServingSim` | image 의 mount point 가 빈 dir 라 host 의 serving/, configs/, profiler/perf/, astra-sim binary 등 다 같이 들어와야 함. write 도 허용 (results/ 외에는 simulator 가 write 안 함). |
+| `astra-sim/inputs` | **anonymous volume** (`-v /app/LLMServingSim/astra-sim/inputs`) | container 별 자동 unique volume. host 의 inputs/ 와 무관 — race 해결의 핵심. `--rm` 시 자동 cleanup. |
+
+`mkdir -p .../{network,system,memory,trace,workload}` — anonymous volume 은 빈 dir 로 시작하므로 simulator 가 file 쓸 sub-dir 미리 생성.
 
 **Container 시작 overhead** ~2-3 sec / task. 48 × 3 = 2.4 min 추가.
 무시 가능.
