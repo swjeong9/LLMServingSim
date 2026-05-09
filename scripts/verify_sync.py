@@ -83,19 +83,24 @@ def main():
     print(f"    mean per-call: {A_mean:8.3f} ms")
     print(f"    total wall:    {A_total:8.1f} ms")
 
-    # === [B] single sync at end (ground truth: wall/N) ===
-    sync()
-    t0 = time.perf_counter()
-    outs = []
-    for _ in range(N):
-        outs.append(matmul())
-    sync()
-    t1 = time.perf_counter()
-    B_total = (t1 - t0) * 1000
+    # === [B] chunked single-sync (ground truth: total wall / N) ===
+    # Lazy XLA accumulates outs.append() into ONE big graph that the
+    # Neuron compiler then tries to fuse, so deferring all N=1000
+    # outputs at once OOMs (1000 × 134 MB output = 125 GB on 16 GB HBM).
+    # Chunk into smaller batches; sync() between chunks frees outputs.
+    CHUNK = 10                        # 10 × 134 MB = 1.34 GB, safe
+    B_total = 0.0
+    for _ in range(N // CHUNK):
+        sync()                        # drain previous chunk before timing
+        t0 = time.perf_counter()
+        outs = [matmul() for _ in range(CHUNK)]
+        sync()                        # the only sync that actually waits
+        t1 = time.perf_counter()
+        B_total += (t1 - t0) * 1000
+        del outs                      # release before next chunk
     B_per_call = B_total / N
-    del outs
-    print(f"\n[B] single sync at end, N={N}:")
-    print(f"    total wall:    {B_total:8.1f} ms")
+    print(f"\n[B] chunked single-sync, N={N} (chunk={CHUNK}):")
+    print(f"    total wall (sum of chunk walls): {B_total:8.1f} ms")
     print(f"    per-call:      {B_per_call:8.3f} ms  (= wall / N, ground truth)")
 
     # === Verdict ===
