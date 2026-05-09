@@ -196,38 +196,56 @@ python studies/inf2_baseline/measure_nxd.py --dataset cnn --batch-size 1 \
 NxDI compile 약 4분 걸림 (NKI bypass 한 native attention path).
 이후 cache hit 으로 빠름.
 
-### 3. Simulator 실행 (CPU 인스턴스 + docker, 병렬)
+### 3. Simulator 실행 (CPU 인스턴스 + docker, multi-container 병렬)
 
-시뮬레이션은 **결정적** 이고 **CPU bound** (ASTRA-Sim 단일 process 가
-core 1개 사용). 즉:
+시뮬레이션은 **결정적** + **CPU bound** (ASTRA-Sim 단일 process 가
+core 1개 사용). 인스턴스 자원 (가속기 시간) 와 무관 → inf2 측정 sweep
+와 동시 진행 가능. 별도 cheap CPU 인스턴스 권장: c6i.8xlarge
+(32 vCPUs, $1.36/h) 또는 c5.4xlarge (16 vCPUs, $0.68/h). 또는 사용자
+로컬 머신 (Mac docker).
 
-* inf2 인스턴스 자원 (가속기 시간) 와 무관 — 측정 sweep 와 동시 진행 가능
-* 워크로드들 사이 의존성 없음 — 코어 수만큼 병렬 실행 가능
-* 별도 cheap CPU 인스턴스 권장: c6i.8xlarge (32 vCPUs, $1.36/h) 또는
-  c5.4xlarge (16 vCPUs, $0.68/h). 또는 사용자 로컬 머신 (Mac docker).
+> ⚠️ **단일 컨테이너 안 multi-process 병렬 (xargs -P) 금지** — 모든
+> process 가 같은 `astra-sim/inputs/` (network.yml, system.json,
+> trace, workload) 를 share 해서 race condition 으로 wallclock 1초
+> 동안 simulated time 이 N×N 초 진행되는 garbage 결과 발생. 반드시
+> **container 별 file system 격리** (multi-container 패턴) 사용.
 
-#### 3.a. 컨테이너 진입 + 빌드 (한 번만)
+#### 3.a. Built image 한 번 만들기
 
 ```bash
 # 호스트에서
-./scripts/docker-sim.sh                 # 컨테이너 시작 + 진입
+./scripts/docker-sim.sh         # 컨테이너 시작 + 진입
 # 컨테이너 안에서
-./scripts/compile.sh                    # ASTRA-Sim + Chakra 빌드
+./scripts/compile.sh            # ASTRA-Sim + Chakra 빌드
+exit                            # 컨테이너 빠져나옴
+
+# 호스트에서 — 빌드된 container state 를 image 로 commit
+docker ps -a | grep tutorial-micro2024     # container 이름 확인
+docker commit <container_name> llmservingsim:built
 ```
 
-#### 3.b. 시뮬레이션 실행 (컨테이너 안에서, 병렬)
+이제 `llmservingsim:built` image 가 ASTRA-Sim/Chakra 빌드 완료 상태로
+보존. 매 sim run 이 이 image 로 fresh container 띄움.
 
-LENS 측정 두 path 모두 `enable_chunked_prefill=False`,
-`enable_prefix_caching=False` 라 시뮬레이터도 일치시킴.
+#### 3.b. 시뮬레이션 실행 (host 에서, multi-container 병렬)
 
 전체 sweep matrix = 4 datasets × 6 batches × 2 TPs = **48 runs**. 단일
-process 로 1-2 일, 8-way 병렬이면 ~6시간, 32-way 면 ~1.5시간.
+container 시퀀셜 1-2 일, 8-way 병렬이면 ~6시간, 16-way 면 ~3시간.
+
+각 task 마다 `docker run --rm` 으로 fresh container 띄움. container 별
+writable layer 가 격리되므로 `astra-sim/inputs/` race condition 없음.
+`workloads/`, `configs/`, `profiler/perf/` 는 read-only mount (input),
+`results/` 만 read-write mount (각 container 가 unique sub-path 에
+write 라 race 없음).
 
 ```bash
-# 결과 위치: studies/inf2_baseline/results/sim/<model>/tp<N>/bs<B>/<dataset>.csv
-mkdir -p studies/inf2_baseline/results/sim/Llama-3.2-1B/tp{1,2}/bs{1,2,4,8,16,32}
+# 호스트에서 (LLMServingSim 디렉토리 안). docker container 는 host
+# 의 xargs -P 로 N개 동시 실행됨.
 
-# 모든 (tp, ds, bs) 조합을 한 줄씩 출력 → xargs -P 로 N-way 병렬
+REPO=$(pwd)
+PARALLEL=${PARALLEL:-8}             # 동시 container 수 (CPU vCPU 의 절반)
+
+# (tp, ds, bs) 매트릭스 한 줄씩
 for tp in 1 2; do
   for ds in arxiv cnn sharegpt writing_prompts; do
     for bs in 1 2 4 8 16 32; do
@@ -236,34 +254,52 @@ for tp in 1 2; do
   done
 done > /tmp/sim_matrix.txt
 
-# nproc 의 절반 정도가 안전 (각 process 가 메모리 좀 먹음).
-# c6i.8xlarge 면 -P 16, c5.4xlarge 면 -P 8.
-PARALLEL=${PARALLEL:-16}
-
 cat /tmp/sim_matrix.txt | xargs -n3 -P${PARALLEL} bash -c '
   tp=$0; ds=$1; bs=$2
-  out=studies/inf2_baseline/results/sim/Llama-3.2-1B/tp${tp}/bs${bs}/${ds}.csv
-  python -m serving \
-    --cluster-config configs/cluster/inf2_xlarge_llama1b_tp${tp}.json \
-    --dataset studies/inf2_baseline/workloads/${ds}_bs${bs}.jsonl \
-    --output ${out} \
-    --max-num-seqs ${bs} \
-    --no-enable-chunked-prefill \
-    --no-enable-prefix-caching \
-    --max-num-batched-tokens 8192 \
-    --dtype bfloat16 \
-    > ${out%.csv}.log 2>&1
+  rel_out=studies/inf2_baseline/results/sim/Llama-3.2-1B/tp${tp}/bs${bs}/${ds}.csv
+  mkdir -p $(dirname '"${REPO}"'/${rel_out})
+
+  docker run --rm \
+    -v '"${REPO}"'/studies/inf2_baseline/workloads:/app/LLMServingSim/studies/inf2_baseline/workloads:ro \
+    -v '"${REPO}"'/studies/inf2_baseline/results:/app/LLMServingSim/studies/inf2_baseline/results \
+    -v '"${REPO}"'/configs:/app/LLMServingSim/configs:ro \
+    -v '"${REPO}"'/profiler/perf:/app/LLMServingSim/profiler/perf:ro \
+    -w /app/LLMServingSim/astra-sim \
+    llmservingsim:built \
+    bash -c "python -m serving \
+      --cluster-config configs/cluster/inf2_xlarge_llama1b_tp${tp}.json \
+      --dataset studies/inf2_baseline/workloads/${ds}_bs${bs}.jsonl \
+      --output ${rel_out} \
+      --max-num-seqs ${bs} \
+      --no-enable-chunked-prefill \
+      --no-enable-prefix-caching \
+      --max-num-batched-tokens 8192 \
+      --dtype bfloat16 \
+      > ${rel_out%.csv}.log 2>&1"
   echo "[done] tp${tp} bs${bs} ${ds}"
 '
 ```
 
+| 디렉토리 mount | mode | 이유 |
+|---|---|---|
+| `studies/inf2_baseline/workloads` | ro | 입력 — 모든 container 가 read |
+| `studies/inf2_baseline/results` | rw | 출력 — 각 container 가 unique path 에 write |
+| `configs` | ro | cluster config — read |
+| `profiler/perf` | ro | profile bundle — read |
+| `astra-sim/inputs` | **mount 안 함** | race 해결의 핵심 — 각 container 자체 layer |
+
+**Container 시작 overhead** ~2-3 sec / task. 48 × 3 = 2.4 min 추가.
+무시 가능.
+
+**Sequential fallback** (안전한 baseline): `PARALLEL=1` 로 같은 명령
+실행. 1-2 일 걸림. 결과는 동일 — multi-container 와 sequential 의
+같은 task 결과는 byte-by-byte 일치 (deterministic).
+
 진행 상황 모니터:
 ```bash
 tail -f studies/inf2_baseline/results/sim/Llama-3.2-1B/tp*/bs*/*.log
+docker ps                       # 현재 실행 중 container 수 확인
 ```
-
-각 sim run 의 stdout/stderr 가 결과 CSV 옆에 `<dataset>.log` 로
-같이 저장됨. scp 로 가져올 때 결과 CSV + log 가 한 번에 따라옴.
 
 #### 3.c. (CPU 인스턴스가 별도면) 결과 transfer 로 가져오기
 
