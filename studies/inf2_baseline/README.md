@@ -96,40 +96,72 @@ done
 **두 framework 가 같은 venv 에 들어있다면** 한 sweep 으로 묶어도 OK,
 **다르다면** 아래 NxD / vLLM 두 sweep 을 각각 해당 venv 활성화 상태에서.
 
-#### 2.b. NxD-direct sweep
+#### 2.b. NxD-direct sweep — **TP=2 먼저, 그 다음 TP=1**
+
+순서 주의: TP=2 가 natural setting (inf2.xlarge 의 1 chip × 2 NeuronCore
+모두 활용 + Llama-3.2-1B 의 KV heads 8 이 TP=2 로 4 per rank 정상 sharding).
+TP=1 은 NxDI 가 GQA → MHA 자동 변환 (CONVERT_TO_MHA warning) 하므로
+KV cache 가 4× 부풀려 측정됨 — simulator (GQA 그대로) 와 비교 시 systematic
+gap 발생. TP=1 결과는 별도 framework artifact 로 해석.
 
 ```bash
-source /opt/aws_neuronx_venv_pytorch_2_9_nxd_inference/bin/activate   # 실제 venv 이름으로 교체
+source /opt/aws_neuronx_venv_pytorch_2_9_nxd_inference/bin/activate
 
-for tp in 1 2; do
-  for ds in arxiv cnn sharegpt writing_prompts; do
-    for bs in 1 2 4 8 16 32; do
-      python studies/inf2_baseline/measure_nxd.py \
-          --dataset ${ds} --batch-size ${bs} \
-          --model meta-llama/Llama-3.2-1B-Instruct \
-          --tp-degree ${tp} --max-model-len 8192 \
-          --compiled-dir /home/ubuntu/compiled_models_inf2_baseline_nxd
-    done
+# 1) TP=2 — fair comparison
+for ds in arxiv cnn sharegpt writing_prompts; do
+  for bs in 1 2 4 8 16 32; do
+    python studies/inf2_baseline/measure_nxd.py \
+        --dataset ${ds} --batch-size ${bs} \
+        --model meta-llama/Llama-3.2-1B-Instruct \
+        --tp-degree 2 --max-model-len 8192 \
+        --compiled-dir /home/ubuntu/compiled_models_inf2_baseline_nxd
+  done
+done
+
+# 2) TP=1 — MHA-converted by NxDI (KV heads expanded 8→32)
+#    "WARNING:Neuron:TP degree (1) and KV heads (8) are not divisible.
+#     Overriding attention sharding strategy to GQA.CONVERT_TO_MHA!"
+#    측정 자체는 그대로 진행, 비교 시 framework artifact 라 표시.
+for ds in arxiv cnn sharegpt writing_prompts; do
+  for bs in 1 2 4 8 16 32; do
+    python studies/inf2_baseline/measure_nxd.py \
+        --dataset ${ds} --batch-size ${bs} \
+        --model meta-llama/Llama-3.2-1B-Instruct \
+        --tp-degree 1 --max-model-len 8192 \
+        --compiled-dir /home/ubuntu/compiled_models_inf2_baseline_nxd_tp1
   done
 done
 
 deactivate
 ```
 
-#### 2.c. vLLM-Neuron sweep
+#### 2.c. vLLM-Neuron sweep — **TP=2 먼저, 그 다음 TP=1**
+
+NxD 와 같은 순서. vLLM-Neuron 도 NxDI 위에 올라가 있어 동일한
+CONVERT_TO_MHA 가 TP=1 에서 발동될 가능성 — 측정 시 warning 확인.
 
 ```bash
-source /opt/aws_neuronx_venv_<vllm-capable>/bin/activate              # 실제 venv 이름으로 교체
+source /opt/aws_neuronx_venv_<vllm-capable>/bin/activate
 
-for tp in 1 2; do
-  for ds in arxiv cnn sharegpt writing_prompts; do
-    for bs in 1 2 4 8 16 32; do
-      python studies/inf2_baseline/measure_vllm.py \
-          --dataset ${ds} --batch-size ${bs} \
-          --model meta-llama/Llama-3.2-1B-Instruct \
-          --tp-degree ${tp} --max-model-len 8192 \
-          --compiled-dir /home/ubuntu/compiled_models_inf2_baseline_vllm
-    done
+# 1) TP=2
+for ds in arxiv cnn sharegpt writing_prompts; do
+  for bs in 1 2 4 8 16 32; do
+    python studies/inf2_baseline/measure_vllm.py \
+        --dataset ${ds} --batch-size ${bs} \
+        --model meta-llama/Llama-3.2-1B-Instruct \
+        --tp-degree 2 --max-model-len 8192 \
+        --compiled-dir /home/ubuntu/compiled_models_inf2_baseline_vllm
+  done
+done
+
+# 2) TP=1 (MHA-converted artifact 의식)
+for ds in arxiv cnn sharegpt writing_prompts; do
+  for bs in 1 2 4 8 16 32; do
+    python studies/inf2_baseline/measure_vllm.py \
+        --dataset ${ds} --batch-size ${bs} \
+        --model meta-llama/Llama-3.2-1B-Instruct \
+        --tp-degree 1 --max-model-len 8192 \
+        --compiled-dir /home/ubuntu/compiled_models_inf2_baseline_vllm_tp1
   done
 done
 
@@ -143,9 +175,9 @@ OOM 또는 too-long 의 경우 자동 skip / ERROR 행으로 기록.
 #### 2.d. 빠른 sanity check
 
 ```bash
-# venv 활성화된 상태에서
-python studies/inf2_baseline/measure_nxd.py --dataset arxiv --batch-size 1 \
-    --model meta-llama/Llama-3.2-1B-Instruct --tp-degree 1 \
+# venv 활성화된 상태에서. 짧은 prompt 가 많은 cnn 으로 + TP=2 (fair).
+python studies/inf2_baseline/measure_nxd.py --dataset cnn --batch-size 1 \
+    --model meta-llama/Llama-3.2-1B-Instruct --tp-degree 2 \
     --max-runs 3 --skip-warmup
 ```
 
@@ -211,3 +243,12 @@ python studies/inf2_baseline/compare.py --tp 2 --batch-sizes 1,2,4,8,16,32
 * < 15% — baseline 으로 valid → 다른 모델/TP 로 확장
 * 15-30% — "approximate baseline" 으로 paper framing
 * \> 30% — bucketing gap 큰 것, framing pivot
+
+### 알려진 framework artifact
+
+* **TP=1 + GQA model (Llama-3.2-1B 등)**: NxDI 가 GQA→MHA 자동 변환
+  ("CONVERT_TO_MHA" warning). KV heads 가 query heads 만큼 replicate 되어
+  KV cache memory + bandwidth 가 4× 부풀림. Simulator 는 GQA 그대로
+  모델링하므로 TP=1 비교에서 systematic 하게 sim 이 빠르게 예측. → TP=1
+  결과는 baseline 평가에서 제외하거나 별도 표기. TP=2 부터는 KV/TP 가
+  나누어떨어져 GQA 정상 동작.
