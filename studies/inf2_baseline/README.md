@@ -64,33 +64,86 @@ python studies/inf2_baseline/convert_workload.py --all
 `results/lens_{nxd,vllm}/<model>/tp<N>/bs<B>/<dataset>_<ts>.csv` 로 저장
 (stable symlink `<dataset>.csv` 가 항상 최신 결과 가리킴).
 
-```bash
-# inf2.xlarge 안, Neuron-DLAMI venv 활성화된 상태:
+#### 2.a. venv 선택
 
-# 4 datasets × {1, 2, 4, 8, 16, 32} batch × {1, 2} TP — sweep
-for fw in nxd vllm; do
-  for tp in 1 2; do
-    for ds in arxiv cnn sharegpt writing_prompts; do
-      for bs in 1 2 4 8 16 32; do
-        python studies/inf2_baseline/measure_${fw}.py \
-            --dataset ${ds} --batch-size ${bs} \
-            --model meta-llama/Llama-3.2-1B-Instruct \
-            --tp-degree ${tp} --max-model-len 8192 \
-            --compiled-dir /home/ubuntu/compiled_models_inf2_baseline_${fw}
-        # arxiv 의 경우 bs > 4 면 row 부족으로 자동 skip 가능 (script 가 검증)
-      done
+AWS Neuron DLAMI 는 여러 venv 를 `/opt/aws_neuronx_venv_*` 에 미리 설치.
+스크립트마다 필요한 패키지가 다르므로 venv 를 분리해 활성화.
+
+```bash
+ls /opt | grep aws_neuronx_venv
+
+# 어느 venv 에 무엇이 있는지 직접 확인
+for v in /opt/aws_neuronx_venv_*; do
+  echo "=== $(basename $v) ==="
+  source $v/bin/activate
+  python -c "
+import importlib.util as u
+for pkg in ['neuronx_distributed_inference', 'vllm', 'torch_neuronx']:
+    print(f'  {pkg}: ' + ('OK' if u.find_spec(pkg) else 'MISSING'))
+" 2>&1 | grep -E "OK|MISSING"
+  deactivate
+done
+```
+
+표준 매핑 (DLAMI 버전에 따라 이름이 약간 다름):
+
+| Script | 필요 패키지 | venv (default name) |
+|---|---|---|
+| `profile_neuron.py` (sweep) | `torch_neuronx` | `aws_neuronx_venv_pytorch_2_9` |
+| `measure_nxd.py` | `neuronx_distributed_inference` | `aws_neuronx_venv_pytorch_2_9_nxd_inference` |
+| `measure_vllm.py` | `vllm` (vllm-neuronx) | `aws_neuronx_venv_pytorch_2_9_nxd_inference` (NxDI venv 안에 vllm 같이 있는 경우 흔함) — 확인 후 결정 |
+
+**두 framework 가 같은 venv 에 들어있다면** 한 sweep 으로 묶어도 OK,
+**다르다면** 아래 NxD / vLLM 두 sweep 을 각각 해당 venv 활성화 상태에서.
+
+#### 2.b. NxD-direct sweep
+
+```bash
+source /opt/aws_neuronx_venv_pytorch_2_9_nxd_inference/bin/activate   # 실제 venv 이름으로 교체
+
+for tp in 1 2; do
+  for ds in arxiv cnn sharegpt writing_prompts; do
+    for bs in 1 2 4 8 16 32; do
+      python studies/inf2_baseline/measure_nxd.py \
+          --dataset ${ds} --batch-size ${bs} \
+          --model meta-llama/Llama-3.2-1B-Instruct \
+          --tp-degree ${tp} --max-model-len 8192 \
+          --compiled-dir /home/ubuntu/compiled_models_inf2_baseline_nxd
     done
   done
 done
+
+deactivate
+```
+
+#### 2.c. vLLM-Neuron sweep
+
+```bash
+source /opt/aws_neuronx_venv_<vllm-capable>/bin/activate              # 실제 venv 이름으로 교체
+
+for tp in 1 2; do
+  for ds in arxiv cnn sharegpt writing_prompts; do
+    for bs in 1 2 4 8 16 32; do
+      python studies/inf2_baseline/measure_vllm.py \
+          --dataset ${ds} --batch-size ${bs} \
+          --model meta-llama/Llama-3.2-1B-Instruct \
+          --tp-degree ${tp} --max-model-len 8192 \
+          --compiled-dir /home/ubuntu/compiled_models_inf2_baseline_vllm
+    done
+  done
+done
+
+deactivate
 ```
 
 OOM 또는 too-long 의 경우 자동 skip / ERROR 행으로 기록.
 같은 `(model, tp, batch, max_model_len)` 의 두 번째 호출은 NEFF cache hit
 (약 30 sec 의 model.load 만), `--skip-compile` 로 더 빠르게 가능.
 
-빠른 sanity check:
+#### 2.d. 빠른 sanity check
 
 ```bash
+# venv 활성화된 상태에서
 python studies/inf2_baseline/measure_nxd.py --dataset arxiv --batch-size 1 \
     --model meta-llama/Llama-3.2-1B-Instruct --tp-degree 1 \
     --max-runs 3 --skip-warmup
