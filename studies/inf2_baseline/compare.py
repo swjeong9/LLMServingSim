@@ -38,19 +38,27 @@ NUM_BATCHES = 50
 
 
 def load_lens(path: Path) -> List[Dict]:
-    """Parse LENS measurement CSV. Columns (run_profiling.py output):
-        run_id, combo_id, combo_il, combo_ol, batch_size, status,
-        sample_ids, input_lens, output_lens, max_n_generated,
-        batch_ttft_ms, batch_e2e_ms, error
+    """Parse LENS measurement CSV. Two formats supported:
+      * measure_nxd.py / measure_vllm.py (dataset-driven, our path):
+          run_id, status, batch_size, sample_ids, input_lens, output_lens,
+          max_input_len, max_output_len, max_n_generated,
+          batch_ttft_ms, batch_e2e_ms, error
+        → run_id IS the batch_id.
+      * LENS run_profiling.py (uniform-batch combo, legacy):
+          run_id, combo_id, combo_il, combo_ol, batch_size, status, ...
+        → combo_id is the batch_id; multiple run_id per combo (n_runs replicates).
     """
     out = []
     with path.open() as f:
         for row in csv.DictReader(f):
             if row.get("status") != "OK":
                 continue
+            # batch_id resolution: combo_id if present (legacy),
+            # else run_id (dataset-driven format).
+            batch_id = int(row["combo_id"]) if "combo_id" in row else int(row["run_id"])
             out.append({
                 "run_id":      int(row["run_id"]),
-                "batch_id":    int(row["combo_id"]),
+                "batch_id":    batch_id,
                 "batch_ttft":  float(row["batch_ttft_ms"] or 0),
                 "batch_e2e":   float(row["batch_e2e_ms"]),
             })
@@ -131,11 +139,12 @@ def summarize(rows: List[Dict], label: str):
                   f"p95={sorted(errs)[int(0.95*len(errs))]:6.2f}%")
 
 
-def run_one(model: str, tp: int, bs: int, dataset: str, write_csv: bool):
+def run_one(model: str, tp: int, bs: int, dataset: str, write_csv: bool,
+            sim_subdir: str = "sim"):
     base = RESULTS
     nxd_path  = base / "lens_nxd"  / model / f"tp{tp}" / f"bs{bs}" / f"{dataset}.csv"
     vllm_path = base / "lens_vllm" / model / f"tp{tp}" / f"bs{bs}" / f"{dataset}.csv"
-    sim_path  = base / "sim"       / model / f"tp{tp}" / f"bs{bs}" / f"{dataset}.csv"
+    sim_path  = base / sim_subdir  / model / f"tp{tp}" / f"bs{bs}" / f"{dataset}.csv"
 
     if not sim_path.exists():
         print(f"[skip] sim missing: {sim_path}")
@@ -168,13 +177,18 @@ def main():
     p.add_argument("--datasets", default=",".join(DATASETS))
     p.add_argument("--no-csv", action="store_true",
                    help="skip writing per-batch comparison CSV")
+    p.add_argument("--sim-subdir", default="sim",
+                   help="results/<sim-subdir>/<model>/... — use 'parallel_sim' "
+                        "if results were collected under a different subtree.")
     args = p.parse_args()
 
     bsl = [int(x) for x in args.batch_sizes.split(",")]
     dsl = [d.strip() for d in args.datasets.split(",") if d.strip()]
     for ds in dsl:
         for bs in bsl:
-            run_one(args.model, args.tp, bs, ds, write_csv=not args.no_csv)
+            run_one(args.model, args.tp, bs, ds,
+                    write_csv=not args.no_csv,
+                    sim_subdir=args.sim_subdir)
 
 
 if __name__ == "__main__":
