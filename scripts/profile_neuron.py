@@ -265,21 +265,23 @@ def get_module(model, dotted: str):
 def build_dummy_input(kind: str, n: int, cfg, dtype, device, batch: int = 1):
     """Build a synthetic input tensor for a given input_shape_kind.
 
-    IMPORTANT: tensors are created on CPU and moved to the Neuron device
-    via .to(device). Creating directly on the XLA device (i.e. passing
-    device=device to torch.zeros) makes the tensor a *compile-time
-    constant* in the resulting HLO graph, so neuron-cc bakes its full
-    contents into the NEFF as a literal. For our sweep that means each
-    NEFF embeds a giant zero tensor (a single decode-attention NEFF can
-    embed a 750+ MB zero K/V tensor). The .to(device) form produces a
-    runtime DMA transfer instead, which the compiler treats as a
-    runtime input — NEFF stays small.
+    Two rules layered together:
 
-    Confirmed by aws-neuron-sdk #1164:
-      torch.zeros(2**31, dtype=fp16, device='xla') + mark_step()
-        → "Neff can only support less than 4GB tensors: constant.1"
-      torch.zeros(2**32, dtype=fp16) + .to('xla') + mark_step()
-        → works, runtime transfer.
+    1) CPU-create + .to(device) — never directly on the XLA device.
+       Creating directly on XLA (e.g. torch.zeros(..., device=device))
+       makes the tensor a *compile-time constant* in the HLO graph, so
+       neuron-cc bakes its full contents into the NEFF as a literal.
+       Confirmed by aws-neuron-sdk #1164. The .to(device) form produces
+       a runtime DMA transfer instead.
+
+    2) Use random data (randn / randint), never zeros. The Neuron
+       compiler can detect zero-valued runtime inputs and short-circuit
+       the downstream compute (returning zeros without doing the actual
+       matmul / attention), which makes profiled latencies wildly
+       optimistic. The original LLMServingSim TPUv4 attention profiler
+       used randn for the same reason (see profiler/v0/profiler/
+       attention/attention_profiler.py:43-45). Random init costs <1 us
+       on CPU — negligible vs the kernel itself.
     """
     rt = _lazy_import_runtime()
     torch = rt["torch"]
@@ -287,17 +289,18 @@ def build_dummy_input(kind: str, n: int, cfg, dtype, device, batch: int = 1):
     nh = cfg.num_attention_heads
     head_dim = getattr(cfg, "head_dim", H // nh)
     inter = cfg.intermediate_size
+    vocab = getattr(cfg, "vocab_size", 32000)
 
     if kind == "ids":
-        return torch.zeros((batch, n), dtype=torch.long).to(device)
+        return torch.randint(0, vocab, (batch, n), dtype=torch.long).to(device)
     if kind in ("hidden", "qkv_in", "mlp_in", "headhid"):
-        return torch.zeros((batch, n, H), dtype=dtype).to(device)
+        return torch.randn((batch, n, H), dtype=dtype).to(device)
     if kind == "o_in":
-        return torch.zeros((batch, n, nh * head_dim), dtype=dtype).to(device)
+        return torch.randn((batch, n, nh * head_dim), dtype=dtype).to(device)
     if kind == "down_in":
-        return torch.zeros((batch, n, inter), dtype=dtype).to(device)
+        return torch.randn((batch, n, inter), dtype=dtype).to(device)
     if kind == "qknorm":
-        return torch.zeros((batch, nh, n, head_dim), dtype=dtype).to(device)
+        return torch.randn((batch, nh, n, head_dim), dtype=dtype).to(device)
     raise ValueError(f"Unknown input kind: {kind}")
 
 
@@ -813,16 +816,16 @@ def sweep_attention(state: "_RuntimeState", arch: str,
     n_rep = max(nh // max(nkv, 1), 1)
 
     def _build_qkv(B: int, q_len: int, k_len: int):
-        # CPU-create + .to(device) so q/k/v become RUNTIME inputs to the
-        # SDPA NEFF, not compile-time constants. See build_dummy_input
-        # for the underlying issue (aws-neuron-sdk #1164). Without this
-        # change, each attention NEFF embeds the full Q/K/V zero tensors
-        # as literals — for decode at (n=32, kv_d=5832) that's a 765 MB
-        # constant per NEFF, and 5-10 such NEFFs accumulated will OOM
-        # the 16 GB Inf2 HBM mid-sweep.
-        q = torch.zeros((B, nh, q_len, head_dim), dtype=state.dtype).to(state.device)
-        k = torch.zeros((B, nkv, k_len, head_dim), dtype=state.dtype).to(state.device)
-        v = torch.zeros((B, nkv, k_len, head_dim), dtype=state.dtype).to(state.device)
+        # Two-fold rule (see build_dummy_input docstring):
+        # (1) CPU-create + .to(device) so q/k/v are runtime DMA inputs,
+        #     not compile-time NEFF constants (aws-neuron-sdk #1164).
+        # (2) randn, not zeros — Neuron compiler can short-circuit SDPA
+        #     when q/k/v are all-zero (output is also zero), which
+        #     makes profiled latencies impossibly fast. Original v0
+        #     TPUv4 attention profiler used randn here too.
+        q = torch.randn((B, nh, q_len, head_dim), dtype=state.dtype).to(state.device)
+        k = torch.randn((B, nkv, k_len, head_dim), dtype=state.dtype).to(state.device)
+        v = torch.randn((B, nkv, k_len, head_dim), dtype=state.dtype).to(state.device)
         if n_rep > 1:
             k = k.repeat_interleave(n_rep, dim=1)
             v = v.repeat_interleave(n_rep, dim=1)
