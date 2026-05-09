@@ -56,11 +56,12 @@ def _model_name(model_path: str) -> str:
     return os.path.basename(p)
 
 
-def _buckets_for(max_model_len: int):
-    bs = [b for b in NEURON_BUCKETS if b <= max_model_len]
+def _buckets_for(max_model_len: int, override=None):
+    base = override if override else NEURON_BUCKETS
+    bs = [b for b in base if b <= max_model_len]
     if max_model_len not in bs:
         bs.append(max_model_len)
-    return bs
+    return sorted(set(bs))
 
 
 def load_dataset_csv(path: Path, batch_size: int):
@@ -86,12 +87,13 @@ def load_dataset_csv(path: Path, batch_size: int):
     return runs
 
 
-def init_llm(model, tp_degree, batch_size, max_model_len, compiled_dir):
+def init_llm(model, tp_degree, batch_size, max_model_len, compiled_dir,
+             bucket_override=None):
     """vLLM-Neuron LLM with explicit buckets + no chunked prefill."""
     from vllm import LLM
     os.environ["NEURON_COMPILED_ARTIFACTS"] = compiled_dir
     os.makedirs(compiled_dir, exist_ok=True)
-    buckets = _buckets_for(max_model_len)
+    buckets = _buckets_for(max_model_len, override=bucket_override)
     print(f"[init_llm] model={model}")
     print(f"  tp={tp_degree} batch={batch_size} max_model_len={max_model_len}")
     print(f"  buckets={buckets}  compiled_dir={compiled_dir}")
@@ -212,7 +214,11 @@ def main():
     p.add_argument("--skip-warmup", action="store_true")
     p.add_argument("--max-runs", type=int, default=None,
                    help="Run only first N runs (sanity). default: all")
+    p.add_argument("--buckets", default=None,
+                   help="comma-separated bucket override, see measure_nxd.py")
     args = p.parse_args()
+    bucket_override = ([int(x) for x in args.buckets.split(",")]
+                       if args.buckets else None)
 
     src_csv = DATA_DIR / f"{args.dataset}.csv"
     if not src_csv.exists():
@@ -238,7 +244,8 @@ def main():
           f"from {src_csv}")
 
     llm = init_llm(args.model, args.tp_degree, args.batch_size,
-                   args.max_model_len, args.compiled_dir)
+                   args.max_model_len, args.compiled_dir,
+                   bucket_override=bucket_override)
     from transformers import AutoTokenizer
     tokenizer = AutoTokenizer.from_pretrained(args.model)
     if tokenizer.pad_token is None:
@@ -276,7 +283,8 @@ def main():
             "batch_size": args.batch_size,
             "max_model_len": args.max_model_len,
             "n_runs": n_runs,
-            "buckets": _buckets_for(args.max_model_len),
+            "buckets": _buckets_for(args.max_model_len,
+                                     override=bucket_override),
             "is_continuous_batching":
                 "auto (vllm-neuron sets True iff max_num_seqs > 1)",
             "input_csv": str(src_csv),
