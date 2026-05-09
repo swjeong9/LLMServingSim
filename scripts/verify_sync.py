@@ -32,8 +32,11 @@ import torch_xla.core.xla_model as xm
 
 
 def sync():
+    # MUST pass wait=True — torch_xla.sync()'s default is wait=False,
+    # which only dispatches the lazy graph and returns immediately
+    # (this is the bug we're verifying / fixed in profile_neuron.py).
     if hasattr(torch_xla, "sync"):
-        torch_xla.sync()
+        torch_xla.sync(wait=True)
     else:
         xm.mark_step()
         xm.wait_device_ops()

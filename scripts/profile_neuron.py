@@ -123,12 +123,18 @@ def _xla_device(rt):
 
 
 def _get_sync(rt):
-    """Return a zero-arg callable that flushes pending device ops and
-    waits for completion. Prefers torch_xla.sync() (torch_xla >= 2.4)
-    over the deprecated xm.mark_step() + xm.wait_device_ops() pair."""
+    """Return a zero-arg callable that flushes pending device ops AND
+    waits for them to complete on the device.
+
+    IMPORTANT: torch_xla.sync()'s default is `wait=False` — it only
+    dispatches the lazy graph and returns immediately. Calling it
+    without `wait=True` measures dispatch overhead, not real device
+    time (verified empirically: with wait=False a single 8192**3
+    bf16 matmul "completes" in 88 us; with wait=True the same call
+    takes 24 ms, matching ~50% of Inf2's 95 TFLOPS BF16 peak)."""
     txla = rt["torch_xla"]
     if hasattr(txla, "sync"):
-        return lambda: txla.sync()
+        return lambda: txla.sync(wait=True)
     xm = rt["xm"]
     def _legacy():
         xm.mark_step()
