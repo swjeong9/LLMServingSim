@@ -122,25 +122,37 @@ artifact 섹션 참고). 두 TP 모두 fair 측정 가능. TP=2 가 inf2.xlarge
 ```bash
 source /opt/aws_neuronx_venv_pytorch_2_9_nxd_inference/bin/activate
 
+# Wrapper: redirect each task's stdout/stderr to <out_dir>/<dataset>.log,
+# only print [done]/[FAIL] to the terminal. log lives next to the result
+# CSV so scp/rsync of results/lens_nxd/ pulls both.
+run_nxd() {
+  local tp=$1 bs=$2 ds=$3 cd=$4
+  local dir=studies/inf2_baseline/results/lens_nxd/Llama-3.2-1B-Instruct/tp${tp}/bs${bs}
+  mkdir -p ${dir}
+  if python studies/inf2_baseline/measure_nxd.py \
+      --dataset ${ds} --batch-size ${bs} \
+      --model ~/models/Llama-3.2-1B-Instruct \
+      --tp-degree ${tp} --max-model-len 8192 \
+      --compiled-dir ${cd} \
+      > ${dir}/${ds}.log 2>&1
+  then
+    echo "[done] tp${tp} bs${bs} ${ds}"
+  else
+    echo "[FAIL] tp${tp} bs${bs} ${ds}  → ${dir}/${ds}.log"
+  fi
+}
+
 # 1) TP=2 — fair comparison
 for bs in 1 2 4 8 16 32; do
   for ds in arxiv cnn sharegpt writing_prompts; do
-    python studies/inf2_baseline/measure_nxd.py \
-        --dataset ${ds} --batch-size ${bs} \
-        --model ~/models/Llama-3.2-1B-Instruct \
-        --tp-degree 2 --max-model-len 8192 \
-        --compiled-dir /home/ubuntu/compiled_models_inf2_baseline_nxd
+    run_nxd 2 ${bs} ${ds} /home/ubuntu/compiled_models_inf2_baseline_nxd
   done
 done
 
 # 2) TP=1 — warning 출력되지만 실제 GQA 동작 (위 issue #1289 참고)
 for bs in 1 2 4 8 16 32; do
   for ds in arxiv cnn sharegpt writing_prompts; do
-    python studies/inf2_baseline/measure_nxd.py \
-        --dataset ${ds} --batch-size ${bs} \
-        --model ~/models/Llama-3.2-1B-Instruct \
-        --tp-degree 1 --max-model-len 8192 \
-        --compiled-dir /home/ubuntu/compiled_models_inf2_baseline_nxd_tp1
+    run_nxd 1 ${bs} ${ds} /home/ubuntu/compiled_models_inf2_baseline_nxd_tp1
   done
 done
 
@@ -155,25 +167,35 @@ CONVERT_TO_MHA 가 TP=1 에서 발동될 가능성 — 측정 시 warning 확인
 ```bash
 source /opt/aws_neuronx_venv_<vllm-capable>/bin/activate
 
+# Same logging wrapper pattern as 2.b.
+run_vllm() {
+  local tp=$1 bs=$2 ds=$3 cd=$4
+  local dir=studies/inf2_baseline/results/lens_vllm/Llama-3.2-1B-Instruct/tp${tp}/bs${bs}
+  mkdir -p ${dir}
+  if python studies/inf2_baseline/measure_vllm.py \
+      --dataset ${ds} --batch-size ${bs} \
+      --model ~/models/Llama-3.2-1B-Instruct \
+      --tp-degree ${tp} --max-model-len 8192 \
+      --compiled-dir ${cd} \
+      > ${dir}/${ds}.log 2>&1
+  then
+    echo "[done] tp${tp} bs${bs} ${ds}"
+  else
+    echo "[FAIL] tp${tp} bs${bs} ${ds}  → ${dir}/${ds}.log"
+  fi
+}
+
 # 1) TP=2
 for bs in 1 2 4 8 16 32; do
   for ds in arxiv cnn sharegpt writing_prompts; do
-    python studies/inf2_baseline/measure_vllm.py \
-        --dataset ${ds} --batch-size ${bs} \
-        --model ~/models/Llama-3.2-1B-Instruct \
-        --tp-degree 2 --max-model-len 8192 \
-        --compiled-dir /home/ubuntu/compiled_models_inf2_baseline_vllm
+    run_vllm 2 ${bs} ${ds} /home/ubuntu/compiled_models_inf2_baseline_vllm
   done
 done
 
 # 2) TP=1 (NxDI warning 무시 OK — issue #1289 참고)
 for bs in 1 2 4 8 16 32; do
   for ds in arxiv cnn sharegpt writing_prompts; do
-    python studies/inf2_baseline/measure_vllm.py \
-        --dataset ${ds} --batch-size ${bs} \
-        --model ~/models/Llama-3.2-1B-Instruct \
-        --tp-degree 1 --max-model-len 8192 \
-        --compiled-dir /home/ubuntu/compiled_models_inf2_baseline_vllm_tp1
+    run_vllm 1 ${bs} ${ds} /home/ubuntu/compiled_models_inf2_baseline_vllm_tp1
   done
 done
 
