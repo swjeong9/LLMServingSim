@@ -147,6 +147,13 @@ def init_model(model_path, tp_degree, batch_size, max_model_len,
         enable_bucketing=True,
         torch_dtype=torch.bfloat16,
         padding_side="right",
+        # Default already False, but pinned explicitly: NxDI's
+        # determine_sharding_strategy() mislabels GQA as CONVERT_TO_MHA
+        # when tp_degree < num_kv_heads (e.g. TP=1/2 with Llama's KV=8),
+        # but standard attention runs as true GQA at runtime — only
+        # flash_decoding_enabled=True crashes in this regime.
+        # See aws-neuron-sdk #1289.
+        flash_decoding_enabled=False,
     )
     model_cls = _get_model_cls(model_path)
     config = model_cls.get_config_cls()(

@@ -96,13 +96,12 @@ done
 **두 framework 가 같은 venv 에 들어있다면** 한 sweep 으로 묶어도 OK,
 **다르다면** 아래 NxD / vLLM 두 sweep 을 각각 해당 venv 활성화 상태에서.
 
-#### 2.b. NxD-direct sweep — **TP=2 먼저, 그 다음 TP=1**
+#### 2.b. NxD-direct sweep — TP=2 먼저, TP=1 그 다음
 
-순서 주의: TP=2 가 natural setting (inf2.xlarge 의 1 chip × 2 NeuronCore
-모두 활용 + Llama-3.2-1B 의 KV heads 8 이 TP=2 로 4 per rank 정상 sharding).
-TP=1 은 NxDI 가 GQA → MHA 자동 변환 (CONVERT_TO_MHA warning) 하므로
-KV cache 가 4× 부풀려 측정됨 — simulator (GQA 그대로) 와 비교 시 systematic
-gap 발생. TP=1 결과는 별도 framework artifact 로 해석.
+NxDI 가 두 TP 모두 "CONVERT_TO_MHA" warning 출력하지만 misleading —
+실제 runtime 은 GQA 그대로 동작 (issue #1289, 알려진 framework
+artifact 섹션 참고). 두 TP 모두 fair 측정 가능. TP=2 가 inf2.xlarge
+의 1 chip × 2 NeuronCore 모두 활용하는 natural setting 이라 먼저 진행.
 
 ```bash
 source /opt/aws_neuronx_venv_pytorch_2_9_nxd_inference/bin/activate
@@ -118,10 +117,7 @@ for ds in arxiv cnn sharegpt writing_prompts; do
   done
 done
 
-# 2) TP=1 — MHA-converted by NxDI (KV heads expanded 8→32)
-#    "WARNING:Neuron:TP degree (1) and KV heads (8) are not divisible.
-#     Overriding attention sharding strategy to GQA.CONVERT_TO_MHA!"
-#    측정 자체는 그대로 진행, 비교 시 framework artifact 라 표시.
+# 2) TP=1 — warning 출력되지만 실제 GQA 동작 (위 issue #1289 참고)
 for ds in arxiv cnn sharegpt writing_prompts; do
   for bs in 1 2 4 8 16 32; do
     python studies/inf2_baseline/measure_nxd.py \
@@ -154,7 +150,7 @@ for ds in arxiv cnn sharegpt writing_prompts; do
   done
 done
 
-# 2) TP=1 (MHA-converted artifact 의식)
+# 2) TP=1 (NxDI warning 무시 OK — issue #1289 참고)
 for ds in arxiv cnn sharegpt writing_prompts; do
   for bs in 1 2 4 8 16 32; do
     python studies/inf2_baseline/measure_vllm.py \
@@ -246,9 +242,14 @@ python studies/inf2_baseline/compare.py --tp 2 --batch-sizes 1,2,4,8,16,32
 
 ### 알려진 framework artifact
 
-* **TP=1 + GQA model (Llama-3.2-1B 등)**: NxDI 가 GQA→MHA 자동 변환
-  ("CONVERT_TO_MHA" warning). KV heads 가 query heads 만큼 replicate 되어
-  KV cache memory + bandwidth 가 4× 부풀림. Simulator 는 GQA 그대로
-  모델링하므로 TP=1 비교에서 systematic 하게 sim 이 빠르게 예측. → TP=1
-  결과는 baseline 평가에서 제외하거나 별도 표기. TP=2 부터는 KV/TP 가
-  나누어떨어져 GQA 정상 동작.
+* **NxDI warning "TP degree (X) and KV heads (8) are not divisible.
+  Overriding attention sharding strategy to GQA.CONVERT_TO_MHA"**:
+  무시 OK. AWS 가 [aws-neuron-sdk #1289](https://github.com/aws-neuron/aws-neuron-sdk/issues/1289)
+  에서 인정한 mislabel — `determine_sharding_strategy()` 의 label
+  자체는 잘못 찍히지만 실제 runtime 의 attention 은 `get_shardable_head_counts()`
+  의 looser 조건 (`kv < tp` or `kv % tp != 0`) 만 보고 head 수 결정하므로
+  TP=1/2 + KV=8 모두 진짜 GQA 그대로 동작 (TP=1: Q=32, KV=8 / TP=2:
+  Q=16, KV=4 per rank). 단 **`flash_decoding_enabled=True` + tp<kv** 일
+  때만 진짜 crash → measure_nxd.py 가 `flash_decoding_enabled=False`
+  로 명시 (default 도 False). vLLM-Neuron 도 동일 logic 인지 vllm 측정
+  warning + flash_decoding 옵션 확인.
