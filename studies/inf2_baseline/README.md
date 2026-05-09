@@ -26,12 +26,12 @@ studies/inf2_baseline/
 
 ## Sweep matrix
 
-| 차원 | 값 |
-|---|---|
-| Dataset | arxiv, cnn, sharegpt, writing_prompts |
-| Batch size | 1, 2, 4, 8, 16, 32 (OOM 까지) |
-| TP | 1, 2 |
-| Source | LENS-NxD, LENS-vLLM, LLMServingSim |
+| 차원       | 값                                    |
+| ---------- | ------------------------------------- |
+| Dataset    | arxiv, cnn, sharegpt, writing_prompts |
+| Batch size | 1, 2, 4, 8, 16, 32 (OOM 까지)         |
+| TP         | 1, 2                                  |
+| Source     | LENS-NxD, LENS-vLLM, LLMServingSim    |
 
 각 (dataset, batch_size) 조합 = `batch × 50` requests, dataset CSV 위에서부터 순서대로.
 같은 입력 → 결과 reproducibility. (dataset 의 row 수가 부족하면 자동 skip.)
@@ -67,8 +67,7 @@ python studies/inf2_baseline/convert_workload.py --all
 #### 2.a-pre. 모델 사전 다운로드 (`--model` 은 local path 권장)
 
 NxDI 의 `model.load()` 가 weight 가져올 때 model_path 끝에 `/` 가
-붙으면서 HF Hub repo id validator (`HFValidationError: Repo id must
-be in the form 'repo_name' or 'namespace/repo_name'`) 에 거부됨.
+붙으면서 HF Hub repo id validator (`HFValidationError: Repo id must be in the form 'repo_name' or 'namespace/repo_name'`) 에 거부됨.
 LENS 도 같은 이유로 local path (`/home/ubuntu/models/...`) 사용.
 
 ```bash
@@ -104,11 +103,11 @@ done
 
 표준 매핑 (DLAMI 버전에 따라 이름이 약간 다름):
 
-| Script | 필요 패키지 | venv (default name) |
-|---|---|---|
-| `profile_neuron.py` (sweep) | `torch_neuronx` | `aws_neuronx_venv_pytorch_2_9` |
-| `measure_nxd.py` | `neuronx_distributed_inference` | `aws_neuronx_venv_pytorch_2_9_nxd_inference` |
-| `measure_vllm.py` | `vllm` (vllm-neuronx) | `aws_neuronx_venv_pytorch_2_9_nxd_inference` (NxDI venv 안에 vllm 같이 있는 경우 흔함) — 확인 후 결정 |
+| Script                        | 필요 패키지                       | venv (default name)                                                                                      |
+| ----------------------------- | --------------------------------- | -------------------------------------------------------------------------------------------------------- |
+| `profile_neuron.py` (sweep) | `torch_neuronx`                 | `aws_neuronx_venv_pytorch_2_9`                                                                         |
+| `measure_nxd.py`            | `neuronx_distributed_inference` | `aws_neuronx_venv_pytorch_2_9_nxd_inference`                                                           |
+| `measure_vllm.py`           | `vllm` (vllm-neuronx)           | `aws_neuronx_venv_pytorch_2_9_nxd_inference` (NxDI venv 안에 vllm 같이 있는 경우 흔함) — 확인 후 결정 |
 
 **두 framework 가 같은 venv 에 들어있다면** 한 sweep 으로 묶어도 OK,
 **다르다면** 아래 NxD / vLLM 두 sweep 을 각각 해당 venv 활성화 상태에서.
@@ -197,46 +196,78 @@ python studies/inf2_baseline/measure_nxd.py --dataset cnn --batch-size 1 \
 NxDI compile 약 4분 걸림 (NKI bypass 한 native attention path).
 이후 cache hit 으로 빠름.
 
-### 3. Simulator 실행 (로컬 docker)
+### 3. Simulator 실행 (CPU 인스턴스 + docker, 병렬)
 
-3.a. 컨테이너 진입 + 빌드 (한 번만)
+시뮬레이션은 **결정적** 이고 **CPU bound** (ASTRA-Sim 단일 process 가
+core 1개 사용). 즉:
+
+* inf2 인스턴스 자원 (가속기 시간) 와 무관 — 측정 sweep 와 동시 진행 가능
+* 워크로드들 사이 의존성 없음 — 코어 수만큼 병렬 실행 가능
+* 별도 cheap CPU 인스턴스 권장: c6i.8xlarge (32 vCPUs, $1.36/h) 또는
+  c5.4xlarge (16 vCPUs, $0.68/h). 또는 사용자 로컬 머신 (Mac docker).
+
+#### 3.a. 컨테이너 진입 + 빌드 (한 번만)
 
 ```bash
-# 호스트에서 — 시뮬레이터 컨테이너 시작 + 진입
-./scripts/docker-sim.sh
-
-# 컨테이너 안에서 — ASTRA-Sim + Chakra 빌드 (한 번만, 이미 빌드되어 있으면 skip)
-./scripts/compile.sh
+# 호스트에서
+./scripts/docker-sim.sh                 # 컨테이너 시작 + 진입
+# 컨테이너 안에서
+./scripts/compile.sh                    # ASTRA-Sim + Chakra 빌드
 ```
 
-3.b. 시뮬레이션 실행 (컨테이너 안에서)
+#### 3.b. 시뮬레이션 실행 (컨테이너 안에서, 병렬)
 
 LENS 측정 두 path 모두 `enable_chunked_prefill=False`,
-`enable_prefix_caching=False` 로 돌므로 시뮬레이터도 일치시킴 — 안 그러면
-schedule 차이가 framework 차이로 잡혀버림.
+`enable_prefix_caching=False` 라 시뮬레이터도 일치시킴.
+
+전체 sweep matrix = 4 datasets × 6 batches × 2 TPs = **48 runs**. 단일
+process 로 1-2 일, 8-way 병렬이면 ~6시간, 32-way 면 ~1.5시간.
 
 ```bash
-# studies/inf2_baseline/results/sim/<model>/tp<N>/bs<B>/<dataset>.csv 로 저장
+# 결과 위치: studies/inf2_baseline/results/sim/<model>/tp<N>/bs<B>/<dataset>.csv
+mkdir -p studies/inf2_baseline/results/sim/Llama-3.2-1B/tp{1,2}/bs{1,2,4,8,16,32}
+
+# 모든 (tp, ds, bs) 조합을 한 줄씩 출력 → xargs -P 로 N-way 병렬
 for tp in 1 2; do
   for ds in arxiv cnn sharegpt writing_prompts; do
     for bs in 1 2 4 8 16 32; do
-      python -m serving \
-        --cluster-config configs/cluster/inf2_xlarge_llama1b_tp${tp}.json \
-        --dataset studies/inf2_baseline/workloads/${ds}_bs${bs}.jsonl \
-        --output studies/inf2_baseline/results/sim/Llama-3.2-1B/tp${tp}/bs${bs}/${ds}.csv \
-        --max-num-seqs ${bs} \
-        --no-enable-chunked-prefill \
-        --no-enable-prefix-caching \
-        --dtype bfloat16
+      echo "${tp} ${ds} ${bs}"
     done
   done
-done
+done > /tmp/sim_matrix.txt
+
+# nproc 의 절반 정도가 안전 (각 process 가 메모리 좀 먹음).
+# c6i.8xlarge 면 -P 16, c5.4xlarge 면 -P 8.
+PARALLEL=${PARALLEL:-16}
+
+cat /tmp/sim_matrix.txt | xargs -n3 -P${PARALLEL} bash -c '
+  tp=$0; ds=$1; bs=$2
+  out=studies/inf2_baseline/results/sim/Llama-3.2-1B/tp${tp}/bs${bs}/${ds}.csv
+  python -m serving \
+    --cluster-config configs/cluster/inf2_xlarge_llama1b_tp${tp}.json \
+    --dataset studies/inf2_baseline/workloads/${ds}_bs${bs}.jsonl \
+    --output ${out} \
+    --max-num-seqs ${bs} \
+    --no-enable-chunked-prefill \
+    --no-enable-prefix-caching \
+    --max-num-batched-tokens 8192 \
+    --dtype bfloat16 \
+    > /tmp/sim_${tp}_${bs}_${ds}.log 2>&1
+  echo "[done] tp${tp} bs${bs} ${ds}"
+'
 ```
 
-`--max-num-batched-tokens` 의 default 2048 도 LENS 의 max_model_len=8192 와
-다르지만, 우리 워크로드의 단일 prefill 이 8192 를 안 넘으므로 보통 무관 —
-큰 prompt 가 더 많은 step 에 나뉘어 처리될 뿐. 정확히 LENS 동작에 맞추려면
-`--max-num-batched-tokens 8192` 추가.
+병렬 실행 진행 상황은 `tail -f /tmp/sim_*.log` 로 모니터.
+
+`--max-num-batched-tokens 8192` 는 LENS 의 max_model_len 와 일치
+시키기 위함 (default 2048 면 큰 prompt 가 chunked prefill 처럼 여러
+step 으로 나뉘어 schedule 차이 발생). 우리는 chunked prefill off
+이므로 `max-num-batched-tokens` 가 충분히 커야 한 step 에 fit.
+
+**다중 컨테이너 옵션 (더 강한 격리)**: xargs -P 대신 `docker compose`
+또는 `docker run --rm` 으로 N 개 컨테이너 띄우는 것도 가능. 단 ASTRA-Sim
+빌드를 N 번 또는 image 에 미리 포함해야 setup 비용 늘어남. xargs -P
+로 한 컨테이너 안 multi-process 가 가장 단순.
 
 ### 4. 3-way 비교
 
@@ -256,6 +287,7 @@ python studies/inf2_baseline/compare.py --tp 2 --batch-sizes 1,2,4,8,16,32
   batch=1 에서는 거의 동일, batch>1 에서 vLLM 의 continuous batching 효과.
 
 평균 e2e abs error 기준:
+
 * < 15% — baseline 으로 valid → 다른 모델/TP 로 확장
 * 15-30% — "approximate baseline" 으로 paper framing
 * \> 30% — bucketing gap 큰 것, framing pivot
@@ -269,7 +301,6 @@ python studies/inf2_baseline/compare.py --tp 2 --batch-sizes 1,2,4,8,16,32
   의 looser 조건 (`kv < tp` or `kv % tp != 0`) 만 보고 head 수 결정하므로
   TP=1/2 + KV=8 모두 진짜 GQA (TP=1: Q=32, KV=8 / TP=2: Q=16, KV=4 per
   rank). 무시 OK.
-
 * **NKI attention_cte kernel bypass — `attn_kernel_enabled=False`**:
   inf2.xlarge + Llama-3.2-1B + TP < KV (즉 TP=1, 2) + max_model_len
   ≥ 4096 조합에서 NxDI 의 NKI `attention_cte` kernel 이
@@ -277,9 +308,10 @@ python studies/inf2_baseline/compare.py --tp 2 --batch-sizes 1,2,4,8,16,32
   supported for HBM->SB"). 이 stack 의 public report 0건 (LENS 도
   TP≥8 / inf2.24xlarge+ 에서만 NxD-direct 검증). 우리는
   `measure_nxd.py` / `measure_vllm.py` 에 `attn_kernel_enabled=False`
+
   + `attn_block_cte_nki_kernel_enabled=False` + `qkv_kernel_enabled=False`
-  강제로 NKI 우회 → native PyTorch attention path 사용. compile 통과,
-  결과 numerical 동등, 속도만 NKI 보다 느림.
+    강제로 NKI 우회 → native PyTorch attention path 사용. compile 통과,
+    결과 numerical 동등, 속도만 NKI 보다 느림.
 
   **Trade-off**: LENS 의 NKI-on reference 측정 (TP=8, inf2.24xlarge+)
   과는 framework path 다름. 우리 inf2.xlarge 측정 셋 (NxD + vLLM) 은
