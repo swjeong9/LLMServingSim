@@ -163,20 +163,32 @@ python studies/inf2_baseline/measure_nxd.py --dataset arxiv --batch-size 1 \
 
 3.b. 시뮬레이션 실행 (컨테이너 안에서)
 
+LENS 측정 두 path 모두 `enable_chunked_prefill=False`,
+`enable_prefix_caching=False` 로 돌므로 시뮬레이터도 일치시킴 — 안 그러면
+schedule 차이가 framework 차이로 잡혀버림.
+
 ```bash
 # studies/inf2_baseline/results/sim/<model>/tp<N>/bs<B>/<dataset>.csv 로 저장
-for ds in arxiv cnn sharegpt writing_prompts; do
-  for bs in 1 2 4 8 16 32; do
-    python -m serving \
-      --cluster-config configs/cluster/inf2_xlarge_llama1b_tp1.json \
-      --dataset studies/inf2_baseline/workloads/${ds}_bs${bs}.jsonl \
-      --output studies/inf2_baseline/results/sim/Llama-3.2-1B/tp1/bs${bs}/${ds}.csv \
-      --max-num-seqs ${bs} \
-      --dtype bfloat16
+for tp in 1 2; do
+  for ds in arxiv cnn sharegpt writing_prompts; do
+    for bs in 1 2 4 8 16 32; do
+      python -m serving \
+        --cluster-config configs/cluster/inf2_xlarge_llama1b_tp${tp}.json \
+        --dataset studies/inf2_baseline/workloads/${ds}_bs${bs}.jsonl \
+        --output studies/inf2_baseline/results/sim/Llama-3.2-1B/tp${tp}/bs${bs}/${ds}.csv \
+        --max-num-seqs ${bs} \
+        --no-enable-chunked-prefill \
+        --no-enable-prefix-caching \
+        --dtype bfloat16
+    done
   done
 done
-# tp2 도 동일 (--cluster-config tp2 + 디렉토리 tp2)
 ```
+
+`--max-num-batched-tokens` 의 default 2048 도 LENS 의 max_model_len=8192 와
+다르지만, 우리 워크로드의 단일 prefill 이 8192 를 안 넘으므로 보통 무관 —
+큰 prompt 가 더 많은 step 에 나뉘어 처리될 뿐. 정확히 LENS 동작에 맞추려면
+`--max-num-batched-tokens 8192` 추가.
 
 ### 4. 3-way 비교
 
