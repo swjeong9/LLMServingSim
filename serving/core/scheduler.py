@@ -1,4 +1,5 @@
 import bisect
+import os
 import pandas as pd
 from time import time
 import csv
@@ -900,6 +901,7 @@ class Scheduler:
     def save_output(self, output_file, is_append=False):
         output_file = f'../{output_file}'
         mode = 'a' if is_append else 'w'
+        os.makedirs(os.path.dirname(output_file) or '.', exist_ok=True)
         with open(output_file, mode=mode, newline='') as file:
             # Initialize the CSV writer
             writer = csv.writer(file)
