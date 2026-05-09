@@ -257,6 +257,7 @@ done > /tmp/sim_matrix.txt
 cat /tmp/sim_matrix.txt | xargs -n3 -P${PARALLEL} bash -c '
   tp=$0; ds=$1; bs=$2
   rel_out=studies/inf2_baseline/results/sim/Llama-3.2-1B/tp${tp}/bs${bs}/${ds}.csv
+  abs_out=/app/LLMServingSim/${rel_out}
   mkdir -p $(dirname '"${REPO}"'/${rel_out})
 
   docker run --rm \
@@ -275,7 +276,7 @@ cat /tmp/sim_matrix.txt | xargs -n3 -P${PARALLEL} bash -c '
       --no-enable-prefix-caching \
       --max-num-batched-tokens 8192 \
       --dtype bfloat16 \
-      > ${rel_out%.csv}.log 2>&1"
+      > ${abs_out%.csv}.log 2>&1"
   echo "[done] tp${tp} bs${bs} ${ds}"
 '
 ```
