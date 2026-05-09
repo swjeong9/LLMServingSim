@@ -52,22 +52,48 @@ python studies/inf2_baseline/convert_workload.py --all
 
 ### 2. LENS 측정 (인스턴스에서)
 
-LENS repo 의 두 script 사용. profile_csv 인자로 우리 dataset CSV 직접 참조.
+두 framework 측정 스크립트는 study folder 안에 self-contained
+(LENS repo 의존성 없음, NxDI / vLLM-Neuron 패키지만 필요):
+
+* `measure_nxd.py`  — LENS NxD-direct (continuous batching off,
+  `max(output_len)` padding). LENS `run_eval.py` 의 포팅.
+* `measure_vllm.py` — vLLM-Neuron (`max_num_seqs > 1` 이면 continuous
+  batching 자동 ON). LENS `run_profiling_vllm.py` + `run_eval.py` 결합.
+
+두 스크립트 인자 동일. 출력 위치도 자동으로
+`results/lens_{nxd,vllm}/<model>/tp<N>/bs<B>/<dataset>_<ts>.csv` 로 저장
+(stable symlink `<dataset>.csv` 가 항상 최신 결과 가리킴).
 
 ```bash
-# LENS root: ~/npu_chip_project/LENS
+# inf2.xlarge 안, Neuron-DLAMI venv 활성화된 상태:
 
-# NxD-direct
-python LENS/inference_profiling/inf2/run_profiling.py \
-    --model meta-llama/Llama-3.2-1B-Instruct \
-    --tp-degree 1 --batch-size 4 --max-model-len 8192 \
-    --n-runs 3 \
-    --profile-csv studies/inf2_baseline/data/datasets/arxiv.csv \
-    --output-dir studies/inf2_baseline/results/lens_nxd/Llama-3.2-1B/tp1/bs4
+# 4 datasets × {1, 2, 4, 8, 16, 32} batch × {1, 2} TP — sweep
+for fw in nxd vllm; do
+  for tp in 1 2; do
+    for ds in arxiv cnn sharegpt writing_prompts; do
+      for bs in 1 2 4 8 16 32; do
+        python studies/inf2_baseline/measure_${fw}.py \
+            --dataset ${ds} --batch-size ${bs} \
+            --model meta-llama/Llama-3.2-1B-Instruct \
+            --tp-degree ${tp} --max-model-len 8192 \
+            --compiled-dir /home/ubuntu/compiled_models_inf2_baseline_${fw}
+        # arxiv 의 경우 bs > 4 면 row 부족으로 자동 skip 가능 (script 가 검증)
+      done
+    done
+  done
+done
+```
 
-# vLLM-Neuron
-python LENS/inference_profiling/inf2/run_profiling_vllm.py ... \
-    --output-dir studies/inf2_baseline/results/lens_vllm/Llama-3.2-1B/tp1/bs4
+OOM 또는 too-long 의 경우 자동 skip / ERROR 행으로 기록.
+같은 `(model, tp, batch, max_model_len)` 의 두 번째 호출은 NEFF cache hit
+(약 30 sec 의 model.load 만), `--skip-compile` 로 더 빠르게 가능.
+
+빠른 sanity check:
+
+```bash
+python studies/inf2_baseline/measure_nxd.py --dataset arxiv --batch-size 1 \
+    --model meta-llama/Llama-3.2-1B-Instruct --tp-degree 1 \
+    --max-runs 3 --skip-warmup
 ```
 
 ### 3. Simulator 실행 (로컬 docker)
