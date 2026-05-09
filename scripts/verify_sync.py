@@ -83,24 +83,28 @@ def main():
     print(f"    mean per-call: {A_mean:8.3f} ms")
     print(f"    total wall:    {A_total:8.1f} ms")
 
-    # === [B] chunked single-sync (ground truth: total wall / N) ===
-    # Lazy XLA accumulates outs.append() into ONE big graph that the
-    # Neuron compiler then tries to fuse, so deferring all N=1000
-    # outputs at once OOMs (1000 × 134 MB output = 125 GB on 16 GB HBM).
-    # Chunk into smaller batches; sync() between chunks frees outputs.
-    CHUNK = 10                        # 10 × 134 MB = 1.34 GB, safe
-    B_total = 0.0
-    for _ in range(N // CHUNK):
-        sync()                        # drain previous chunk before timing
-        t0 = time.perf_counter()
-        outs = [matmul() for _ in range(CHUNK)]
-        sync()                        # the only sync that actually waits
-        t1 = time.perf_counter()
-        B_total += (t1 - t0) * 1000
-        del outs                      # release before next chunk
+    # === [B] mark_step per iter, wait_device_ops only at end ===
+    # Previous "outs.append() then sync at end" caused lazy XLA to fuse
+    # all N matmuls into ONE huge graph (1000 × 134 MB outputs OOMed,
+    # 10 × 134 MB graph also tripped a cached failed-compile NEFF).
+    #
+    # Use the same single-matmul NEFF (cache-hot from [A]) and dispatch
+    # it N times via mark_step(), which breaks the graph per call but
+    # does NOT wait. Only call wait_device_ops() once at the end.
+    #   - if wait_device_ops truly waits: wall = N × real_per_call
+    #   - if it doesn't either: wall = N × dispatch_overhead (≈ [A])
+    sync()                            # clean start
+    t0 = time.perf_counter()
+    for _ in range(N):
+        out = matmul()
+        xm.mark_step()                # break graph, dispatch, NO wait
+        del out
+    xm.wait_device_ops()              # the single real wait
+    t1 = time.perf_counter()
+    B_total = (t1 - t0) * 1000
     B_per_call = B_total / N
-    print(f"\n[B] chunked single-sync, N={N} (chunk={CHUNK}):")
-    print(f"    total wall (sum of chunk walls): {B_total:8.1f} ms")
+    print(f"\n[B] mark_step per iter + wait_device_ops at end, N={N}:")
+    print(f"    total wall:    {B_total:8.1f} ms")
     print(f"    per-call:      {B_per_call:8.3f} ms  (= wall / N, ground truth)")
 
     # === Verdict ===
