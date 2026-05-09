@@ -110,6 +110,13 @@ def init_llm(model, tp_degree, batch_size, max_model_len, compiled_dir):
                 "save_sharded_checkpoint": True,
                 "context_encoding_buckets": buckets,
                 "token_generation_buckets": buckets,
+                # Pin off — same reason as measure_nxd.py: NxDI's
+                # flash_decoding kernel asserts "1 KV head per rank"
+                # and crashes when tp_degree < num_kv_heads. Default
+                # is already False, but explicit avoids surprises if
+                # vLLM-Neuron flips the default in a future release.
+                # See aws-neuron-sdk #1289.
+                "flash_decoding_enabled": False,
             },
         },
     )
