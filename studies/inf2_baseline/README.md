@@ -269,11 +269,12 @@ cat /tmp/sim_matrix.txt | xargs -n3 -P${PARALLEL} bash -c '
 
   docker run --rm \
     -v '"${REPO}"':/app/LLMServingSim \
+    -v '"${REPO}"'/astra-sim/inputs:/tmp/inputs_template:ro \
     -v /app/LLMServingSim/astra-sim/inputs \
     -w /app/LLMServingSim \
     llmservingsim:built \
     bash -c "
-      mkdir -p /app/LLMServingSim/astra-sim/inputs/{network,system,memory,trace,workload}
+      cp -r /tmp/inputs_template/. /app/LLMServingSim/astra-sim/inputs/
       python -m serving \
         --cluster-config configs/cluster/inf2_xlarge_llama1b_tp${tp}.json \
         --dataset studies/inf2_baseline/workloads/${ds}_bs${bs}.jsonl \
@@ -295,8 +296,9 @@ Mount 정책:
 |---|---|---|
 | `${REPO}` (호스트 repo 전체) | bind mount → `/app/LLMServingSim` | image 의 mount point 가 빈 dir 라 host 의 serving/, configs/, profiler/perf/, astra-sim binary 등 다 같이 들어와야 함. write 도 허용 (results/ 외에는 simulator 가 write 안 함). |
 | `astra-sim/inputs` | **anonymous volume** (`-v /app/LLMServingSim/astra-sim/inputs`) | container 별 자동 unique volume. host 의 inputs/ 와 무관 — race 해결의 핵심. `--rm` 시 자동 cleanup. |
+| `${REPO}/astra-sim/inputs → /tmp/inputs_template` (ro) | bind ro | host 의 base inputs/ template (system.json 등). config_builder.py 가 read-modify-write 라 시작 시점에 anonymous volume 안에 한 번 cp. anonymous volume 위치(`/app/LLMServingSim/astra-sim/inputs`) 와 다른 path 로 mount 해야 가려지지 않음. |
 
-`mkdir -p .../{network,system,memory,trace,workload}` — anonymous volume 은 빈 dir 로 시작하므로 simulator 가 file 쓸 sub-dir 미리 생성.
+`cp -r /tmp/inputs_template/. .../astra-sim/inputs/` — host 의 base inputs (system.json template + sub-dir 구조) 를 container 별 anonymous volume 에 복사. 이후 simulator 의 read-modify-write 동작 OK + write 는 anonymous volume 안에서만 일어나므로 host 무관 + race 격리 유지.
 
 **Container 시작 overhead** ~2-3 sec / task. 48 × 3 = 2.4 min 추가.
 무시 가능.
