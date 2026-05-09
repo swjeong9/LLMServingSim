@@ -97,17 +97,20 @@ def main():
         print(f"[2] sync()  {N:>2} matmuls:       "
               f"{batch_ms:8.3f} ms total / {batch_ms/N:6.3f} ms each")
 
-    # === Test 3: single matmul + .cpu() readback (ground truth) ===
-    # .cpu() forces a real device→host transfer, which absolutely
-    # cannot complete before the matmul is done.
+    # === Test 3: single matmul + 1-element readback (ground truth) ===
+    # Reading just out[0,0] forces the full matmul to complete (the
+    # element can't exist before the kernel is done) but transfers
+    # only 2 bytes — DMA overhead is negligible (vs ~5 ms for a full
+    # 134 MB .cpu() of an 8192² bf16 tensor). So this isolates
+    # device compute time without transfer pollution.
     sync()
     t0 = time.perf_counter()
     out = matmul()
-    result = out.cpu()
+    val = out.flatten()[0].item()   # 2 B transfer, forced wait
     t1 = time.perf_counter()
     cpu_ms = (t1 - t0) * 1000
-    print(f"\n[3] .cpu()  single matmul:        {cpu_ms:8.3f} ms"
-          f"  (result[0,0]={result[0,0].item():+.4f})")
+    print(f"\n[3] item() single matmul:        {cpu_ms:8.3f} ms"
+          f"  (out[0]={val:+.4f}, 2-byte readback)")
 
     # === Verdict ===
     # 3-way decision tree:
@@ -117,7 +120,7 @@ def main():
     print(f"\n{'=' * 60}")
     print(f"  [0] NO-sync : {nosync_ms:8.3f} ms  (dispatch only)")
     print(f"  [1] sync()  : {single_ms:8.3f} ms  (our profiler pattern)")
-    print(f"  [3] .cpu()  : {cpu_ms:8.3f} ms  (ground truth)")
+    print(f"  [3] item()  : {cpu_ms:8.3f} ms  (ground truth, no DMA pollution)")
     print(f"{'=' * 60}")
     if abs(single_ms - cpu_ms) / max(cpu_ms, 0.01) < 0.30:
         print(f"VERDICT: sync() ≈ .cpu() → sync() truly waits.")
