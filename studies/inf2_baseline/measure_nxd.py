@@ -147,14 +147,20 @@ def init_model(model_path, tp_degree, batch_size, max_model_len,
         enable_bucketing=True,
         torch_dtype=torch.bfloat16,
         padding_side="right",
-        # Intentionally NOT setting flash_decoding_enabled — let NxDI
-        # auto-decide (default None). Empirically, explicit `False`
-        # forces a different attention path in NxDI 0.8.x that hits a
-        # checkDMATranspose verifier crash in attention_cte for large
-        # buckets (4096+) on inf2.xlarge with TP<num_kv_heads. LENS's
-        # run_eval.py also leaves this unset and compiles successfully
-        # for Llama-3.2-1B at TP=2 (see LENS/inference_results/
-        # inference_vllm/inf2/Llama-3.2-1B-Instruct/bs1_tp2/).
+        # Force native PyTorch attention path — bypass the NKI
+        # attention_cte kernel that crashes the compiler verifier
+        # (checkDMATranspose, "transpose only supported for HBM->SB")
+        # at large prefill buckets (4096, 8192) on inf2.xlarge with
+        # tp_degree < num_kv_heads. The native path is slower than
+        # NKI but produces the same numerical results, and matches
+        # LLMServingSim's own attention modeling (no NKI/SRAM
+        # optimization assumptions). Trade-off: not LENS-NKI-fair —
+        # any LENS NKI-on reference can't be apples-to-apples
+        # compared. See aws-neuron-sdk #1289 + our checkDMATranspose
+        # findings.
+        attn_kernel_enabled=False,
+        attn_block_cte_nki_kernel_enabled=False,
+        qkv_kernel_enabled=False,
     )
     model_cls = _get_model_cls(model_path)
     config = model_cls.get_config_cls()(
