@@ -65,7 +65,7 @@ def main():
         del out
     print(f"  warmup wall: {(time.perf_counter()-t0)*1000:.1f} ms total")
 
-    N = 50
+    N = 1000
 
     # === [A] per-iter sync (profile_neuron pattern) ===
     per_iter_samples = []
@@ -78,9 +78,10 @@ def main():
         per_iter_samples.append((t1 - t0) * 1000)
         del out
     A_mean = sum(per_iter_samples) / N
+    A_total = sum(per_iter_samples)
     print(f"\n[A] per-iter sync, N={N}:")
     print(f"    mean per-call: {A_mean:8.3f} ms")
-    print(f"    total wall:    {sum(per_iter_samples):8.1f} ms")
+    print(f"    total wall:    {A_total:8.1f} ms")
 
     # === [B] single sync at end (ground truth: wall/N) ===
     sync()
@@ -97,34 +98,13 @@ def main():
     print(f"    total wall:    {B_total:8.1f} ms")
     print(f"    per-call:      {B_per_call:8.3f} ms  (= wall / N, ground truth)")
 
-    # === [C] per-iter forced readback ===
-    # Use sum() to reduce to scalar, then item() for transfer (avoids
-    # the .flatten()[0].item() pattern that previously failed to compile).
-    readback_samples = []
-    # Re-warmup with the new graph (sum-reduce) so NEFF for it exists.
-    for _ in range(3):
-        sync()
-        out = matmul()
-        _ = out.sum().item()
-    for _ in range(N):
-        sync()
-        t0 = time.perf_counter()
-        out = matmul()
-        _ = out.sum().item()
-        t1 = time.perf_counter()
-        readback_samples.append((t1 - t0) * 1000)
-    C_mean = sum(readback_samples) / N
-    print(f"\n[C] per-iter readback (sum().item()), N={N}:")
-    print(f"    mean per-call: {C_mean:8.3f} ms")
-    print(f"    (note: NEFF includes the sum reduction, so slightly more work")
-    print(f"     than [A]/[B]; if sync works, [A] ≈ [B]/N anyway.)")
-
     # === Verdict ===
     print(f"\n{'=' * 60}")
-    print(f"Summary:")
-    print(f"  [A] per-iter sync     : {A_mean:8.3f} ms / call")
-    print(f"  [B] single-sync wall/N: {B_per_call:8.3f} ms / call  (ground truth)")
-    print(f"  [C] forced readback   : {C_mean:8.3f} ms / call")
+    print(f"Summary (N={N}):")
+    print(f"  [A] per-iter sync     : {A_mean:8.3f} ms / call  "
+          f"(total wall {A_total/1000:.2f} s)")
+    print(f"  [B] single-sync wall/N: {B_per_call:8.3f} ms / call  "
+          f"(total wall {B_total/1000:.2f} s)  ← ground truth")
     print(f"{'=' * 60}")
     ratio_A_to_B = A_mean / max(B_per_call, 1e-6)
     if ratio_A_to_B > 0.7:
