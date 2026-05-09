@@ -72,8 +72,20 @@ python LENS/inference_profiling/inf2/run_profiling_vllm.py ... \
 
 ### 3. Simulator 실행 (로컬 docker)
 
+3.a. 컨테이너 진입 + 빌드 (한 번만)
+
 ```bash
-# studies/inf2_baseline/results/sim/<model>/tp<N>/bs<B>/<dataset>.csv 로 정리해 저장
+# 호스트에서 — 시뮬레이터 컨테이너 시작 + 진입
+./scripts/docker-sim.sh
+
+# 컨테이너 안에서 — ASTRA-Sim + Chakra 빌드 (한 번만, 이미 빌드되어 있으면 skip)
+./scripts/compile.sh
+```
+
+3.b. 시뮬레이션 실행 (컨테이너 안에서)
+
+```bash
+# studies/inf2_baseline/results/sim/<model>/tp<N>/bs<B>/<dataset>.csv 로 저장
 for ds in arxiv cnn sharegpt writing_prompts; do
   for bs in 1 2 4 8 16 32; do
     python -m serving \
