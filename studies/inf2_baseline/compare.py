@@ -1,26 +1,17 @@
 #!/usr/bin/env python3
-"""3-way compare for the inf2 baseline study.
+"""3-way 50-batch end-to-end wallclock comparison + figures.
 
-Joins three measurements of the same (dataset, tp, batch_size) by
-request order and reports per-batch and aggregated abs/signed errors:
+LENS-NxD vs LENS-vLLM vs LLMServingSim.
 
-  * LENS-NxD     — LENS run_profiling.py output (NxD-direct, no vLLM)
-  * LENS-vLLM    — LENS run_profiling_vllm.py output (vLLM-Neuron)
-  * Sim          — LLMServingSim per-request CSV
+Each LENS run = 50 sequential batches; total = sum(per-batch_e2e_ms)
+(averaged over n_runs replicates if any).
+Sim total = max(end_time) - min(arrival), ns -> ms.
 
-Each LENS row is one batch of size B → 50 batches × n_runs rows.
-Sim's per-request output is grouped into batches of B consecutive
-requests; batch_e2e = max(latency) across the B, batch_ttft = max(TTFT).
-
-The directory layout under results/ is::
-
-    results/lens_nxd/<model>/tp<N>/bs<B>/<dataset>.csv
-    results/lens_vllm/<model>/tp<N>/bs<B>/<dataset>.csv
-    results/sim/<model>/tp<N>/bs<B>/<dataset>.csv
-
-Status: SKELETON. Will be finalized once we have the first real
-LENS measurement output and confirm column names. Wire-up TODO marked
-with ``# TODO`` comments.
+Usage:
+    python compare.py                       # all TPs, all bs, all ds + figures
+    python compare.py --tps 1               # TP=1 only
+    python compare.py --no-figs             # table only
+    python compare.py --no-table            # figures only
 """
 from __future__ import annotations
 
@@ -28,238 +19,214 @@ import argparse
 import csv
 import statistics
 from pathlib import Path
-from typing import Dict, List, Tuple
+from typing import Optional
 
-
-STUDY_ROOT = Path(__file__).resolve().parent
-RESULTS = STUDY_ROOT / "results"
+ROOT = Path(__file__).parent / "results"
+FIG_DIR = Path(__file__).parent / "figures"
 DATASETS = ("arxiv", "cnn", "sharegpt", "writing_prompts")
-NUM_BATCHES = 50
 
 
-def load_lens(path: Path) -> List[Dict]:
-    """Parse LENS measurement CSV. Two formats supported:
-      * measure_nxd.py / measure_vllm.py (dataset-driven, our path):
-          run_id, status, batch_size, sample_ids, input_lens, output_lens,
-          max_input_len, max_output_len, max_n_generated,
-          batch_ttft_ms, batch_e2e_ms, error
-        → run_id IS the batch_id.
-      * LENS run_profiling.py (uniform-batch combo, legacy):
-          run_id, combo_id, combo_il, combo_ol, batch_size, status, ...
-        → combo_id is the batch_id; multiple run_id per combo (n_runs replicates).
-    """
-    out = []
+# ---------------------------------------------------------------------------
+# Loaders
+# ---------------------------------------------------------------------------
+
+def lens_total(path: Path) -> Optional[float]:
+    """Sum batch_e2e_ms across batch_ids; replicates per batch are averaged."""
+    if not path.exists():
+        return None
+    by_batch: dict[int, list[float]] = {}
     with path.open() as f:
-        for row in csv.DictReader(f):
-            if row.get("status") != "OK":
+        for r in csv.DictReader(f):
+            if r.get("status") != "OK":
                 continue
-            # batch_id resolution: combo_id if present (legacy),
-            # else run_id (dataset-driven format).
-            batch_id = int(row["combo_id"]) if "combo_id" in row else int(row["run_id"])
-            out.append({
-                "run_id":      int(row["run_id"]),
-                "batch_id":    batch_id,
-                "batch_ttft":  float(row["batch_ttft_ms"] or 0),
-                "batch_e2e":   float(row["batch_e2e_ms"]),
-            })
-    return out
-
-
-def load_sim(path: Path, batch_size: int) -> Tuple[List[Dict], float]:
-    """Parse LLMServingSim per-request CSV. Returns (per_batch_rows, total_ms).
-
-    Sim emits ns; convert to ms.
-
-    * total_ms = max(end_time) - min(arrival): wall time to process all
-      requests (the headline number — equivalent to LENS's sum-of-batches
-      under sequential batches, and to vLLM's overall sweep time under
-      continuous batching).
-    * per-batch rows are an analytical view: chunk every batch_size
-      consecutive requests (arrival order) and report per-chunk
-      max(latency), max(TTFT). Useful for inspection but not for the
-      headline error since chunk boundaries don't line up with vLLM's
-      actual batching.
-    """
-    with path.open() as f:
-        rows = list(csv.DictReader(f))
-    arrivals  = [int(r["arrival"])  for r in rows]
-    end_times = [int(r["end_time"]) for r in rows]
-    total_ms = (max(end_times) - min(arrivals)) / 1e6
-
-    batches = []
-    for i in range(0, len(rows), batch_size):
-        chunk = rows[i:i + batch_size]
-        if len(chunk) < batch_size:
-            break
-        # Subtract queuing_delay so per-batch e2e is pure processing
-        # time of that batch — comparable to LENS NxD's batch_e2e_ms
-        # (each NxD batch starts fresh from 0, queueing-free). Without
-        # this, sim's `latency` accumulates wait time for queued reqs
-        # at small batch sizes, blowing up the per-batch error to
-        # thousands of percent.
-        def proc(r):
-            return (float(r["latency"]) - float(r["queuing_delay"])) / 1e6
-        batches.append({
-            "batch_id":   i // batch_size,
-            "batch_ttft": max(float(r["TTFT"]) / 1e6 for r in chunk),
-            "batch_e2e":  max(proc(r) for r in chunk),
-        })
-    return batches, total_ms
-
-
-def lens_total_ms(rows: List[Dict]) -> float:
-    """LENS sweep is 50 sequential batches per measurement file →
-    sum of per-batch e2e is the total time to process all requests.
-    Average across replicate runs (n_runs) per batch_id first so we
-    don't double-count when LENS recorded n_runs > 1."""
-    by_batch: Dict[int, List[float]] = {}
-    for r in rows:
-        by_batch.setdefault(r["batch_id"], []).append(r["batch_e2e"])
+            bid = int(r["combo_id"]) if "combo_id" in r else int(r["run_id"])
+            by_batch.setdefault(bid, []).append(float(r["batch_e2e_ms"]))
+    if not by_batch:
+        return None
     return sum(statistics.fmean(v) for v in by_batch.values())
 
 
-def join_3way(lens_nxd, lens_vllm, sim) -> List[Dict]:
-    """Match by batch_id. LENS rows include n_runs replicates; average them
-    per batch_id before joining with Sim (which has one entry per batch)."""
-    def avg_by_batch(rows):
-        groups: Dict[int, List[Dict]] = {}
-        for r in rows:
-            groups.setdefault(r["batch_id"], []).append(r)
-        return {bid: {
-            "batch_ttft": statistics.fmean(r["batch_ttft"] for r in rs),
-            "batch_e2e":  statistics.fmean(r["batch_e2e"]  for r in rs),
-        } for bid, rs in groups.items()}
-
-    nxd  = avg_by_batch(lens_nxd)  if lens_nxd  else {}
-    vllm = avg_by_batch(lens_vllm) if lens_vllm else {}
-    sim_by_id = {b["batch_id"]: b for b in sim}
-
-    rows = []
-    for bid in sorted(sim_by_id):
-        s = sim_by_id[bid]
-        n = nxd.get(bid)
-        v = vllm.get(bid)
-        rows.append({
-            "batch_id":   bid,
-            "sim_e2e":    s["batch_e2e"],
-            "nxd_e2e":    n["batch_e2e"] if n else None,
-            "vllm_e2e":   v["batch_e2e"] if v else None,
-            "sim_ttft":   s["batch_ttft"],
-            "nxd_ttft":   n["batch_ttft"] if n else None,
-            "vllm_ttft":  v["batch_ttft"] if v else None,
-        })
-    return rows
-
-
-def summarize(rows: List[Dict], totals: Dict[str, float], label: str):
-    """Print TOTAL (headline) + per-batch error stats of sim vs each ref."""
-    def err_pct(s, g):
-        if g is None or g == 0:
-            return None
-        return abs(s - g) / g * 100
-
-    print(f"\n=== {label}  (n_batches={len(rows)}) ===")
-
-    # Headline: TOTAL time to process all requests.
-    sim_total = totals["sim"]
-    print(f"  TOTAL e2e (all-reqs wall time, ms):")
-    print(f"    sim   = {sim_total:>10.1f}")
-    for ref in ("nxd", "vllm"):
-        rt = totals.get(ref)
-        if rt is None:
-            continue
-        err = err_pct(sim_total, rt)
-        sign = "+" if sim_total >= rt else "-"
-        print(f"    {ref:<5} = {rt:>10.1f}    sim/{ref} err = "
-              f"{sign}{err:5.2f}%  (sim {'over' if sim_total>rt else 'under'})")
-
-    # Analytical: per-batch distribution.
-    if rows:
-        print(f"  per-batch (analytical):")
-        for ref in ("nxd", "vllm"):
-            for metric in ("e2e", "ttft"):
-                errs = [err_pct(r[f"sim_{metric}"], r[f"{ref}_{metric}"])
-                        for r in rows]
-                errs = [e for e in errs if e is not None]
-                if not errs:
-                    continue
-                print(f"    sim vs {ref:<4} {metric:<4}  "
-                      f"mean={statistics.fmean(errs):6.2f}%  "
-                      f"median={statistics.median(errs):6.2f}%  "
-                      f"p95={sorted(errs)[int(0.95*len(errs))]:6.2f}%")
-
-
-def run_one(model: str, tp: int, bs: int, dataset: str, write_csv: bool,
-            sim_subdir: str = "sim", lens_model: str | None = None):
-    base = RESULTS
-    lm = lens_model or f"{model}-Instruct"   # measure_*.py uses basename (Instruct included)
-    nxd_path  = base / "lens_nxd"  / lm    / f"tp{tp}" / f"bs{bs}" / f"{dataset}.csv"
-    vllm_path = base / "lens_vllm" / lm    / f"tp{tp}" / f"bs{bs}" / f"{dataset}.csv"
-    sim_path  = base / sim_subdir  / model / f"tp{tp}" / f"bs{bs}" / f"{dataset}.csv"
-
-    if not sim_path.exists():
-        print(f"[skip] sim missing: {sim_path}")
+def sim_total(path: Path) -> Optional[float]:
+    """max(end_time) - min(arrival), ns -> ms."""
+    if not path.exists():
         return None
-    nxd  = load_lens(nxd_path)  if nxd_path.exists()  else []
-    vllm = load_lens(vllm_path) if vllm_path.exists() else []
-    sim, sim_total = load_sim(sim_path, bs)
-    if not (nxd or vllm):
-        print(f"[warn] no ground truth for {dataset} tp{tp} bs{bs}")
+    arrivals: list[int] = []
+    ends: list[int] = []
+    with path.open() as f:
+        for r in csv.DictReader(f):
+            arrivals.append(int(r["arrival"]))
+            ends.append(int(r["end_time"]))
+    if not arrivals:
+        return None
+    return (max(ends) - min(arrivals)) / 1e6
 
-    totals = {"sim": sim_total}
-    if nxd:  totals["nxd"]  = lens_total_ms(nxd)
-    if vllm: totals["vllm"] = lens_total_ms(vllm)
 
-    rows = join_3way(nxd, vllm, sim)
-    summarize(rows, totals, f"{dataset}  tp={tp}  bs={bs}")
+def collect(tp: int, batch_sizes, model: str, lens_model: str) -> dict:
+    """Return {(ds, bs): {'sim', 'nxd', 'vllm'}} for one TP."""
+    out = {}
+    for ds in DATASETS:
+        for bs in batch_sizes:
+            out[(ds, bs)] = {
+                "sim":  sim_total(ROOT / f"sim/{model}/tp{tp}/bs{bs}/{ds}.csv"),
+                "nxd":  lens_total(ROOT / f"lens_nxd/{lens_model}/tp{tp}/bs{bs}/{ds}.csv"),
+                "vllm": lens_total(ROOT / f"lens_vllm/{lens_model}/tp{tp}/bs{bs}/{ds}.csv"),
+            }
+    return out
 
-    if write_csv:
-        out = STUDY_ROOT / "comparison" / f"{model}_tp{tp}_bs{bs}_{dataset}.csv"
-        out.parent.mkdir(parents=True, exist_ok=True)
-        with out.open("w", newline="") as f:
-            # First row: TOTAL (headline). Then per-batch rows.
-            fieldnames = ["batch_id", "sim_e2e", "nxd_e2e", "vllm_e2e",
-                          "sim_ttft", "nxd_ttft", "vllm_ttft"]
-            w = csv.DictWriter(f, fieldnames=fieldnames)
-            w.writeheader()
-            w.writerow({
-                "batch_id": "TOTAL",
-                "sim_e2e":  totals["sim"],
-                "nxd_e2e":  totals.get("nxd",  ""),
-                "vllm_e2e": totals.get("vllm", ""),
-                "sim_ttft": "", "nxd_ttft": "", "vllm_ttft": "",
-            })
-            w.writerows(rows)
-        print(f"  → {out}")
-    return rows
 
+# ---------------------------------------------------------------------------
+# Table
+# ---------------------------------------------------------------------------
+
+def print_table(tp: int, data, batch_sizes):
+    print()
+    print("=" * 90)
+    print(f"TP={tp}  —  50-batch e2e total wallclock (ms)")
+    print("=" * 90)
+    h_ds, h_bs = "dataset", "bs"
+    h_sim, h_nxd, h_vllm = "sim", "nxd", "vllm"
+    h_sn, h_sv = "sim/nxd", "sim/vllm"
+    print(f"{h_ds:<16} {h_bs:>3}  {h_sim:>10}  {h_nxd:>10}  {h_vllm:>10}  {h_sn:>9}  {h_sv:>9}")
+    print("-" * 90)
+    for ds in DATASETS:
+        for bs in batch_sizes:
+            d = data[(ds, bs)]
+            s, n, v = d["sim"], d["nxd"], d["vllm"]
+            ss = f"{s:>10.1f}" if s is not None else f'{"-":>10}'
+            ns = f"{n:>10.1f}" if n is not None else f'{"-":>10}'
+            vs = f"{v:>10.1f}" if v is not None else f'{"-":>10}'
+            sn = f"{(s-n)/n*100:+8.1f}%" if (s is not None and n) else f'{"-":>9}'
+            sv = f"{(s-v)/v*100:+8.1f}%" if (s is not None and v) else f'{"-":>9}'
+            print(f"{ds:<16} {bs:>3}  {ss}  {ns}  {vs}  {sn}  {sv}")
+        print()
+
+
+# ---------------------------------------------------------------------------
+# Figures
+# ---------------------------------------------------------------------------
+
+def make_figures(tps, batch_sizes, all_data, model):
+    """Grouped bar charts: per (TP, bs) subplot, x = 4 datasets,
+    3 bars per dataset (sim / lens_nxd / lens_vllm)."""
+    import matplotlib.pyplot as plt
+    import numpy as np
+
+    FIG_DIR.mkdir(parents=True, exist_ok=True)
+
+    METHODS = (("sim", "tab:blue"), ("nxd", "tab:orange"), ("vllm", "tab:green"))
+    METHOD_LABEL = {"sim": "LLMServingSim2.0", "nxd": "NxDI", "vllm": "vLLM"}
+    n_methods = len(METHODS)
+    width = 0.27   # per-bar width within a dataset group
+
+    # Font sizes
+    FS_SUPTITLE   = 24
+    FS_SUBTITLE   = 20
+    FS_AXISLABEL  = 18
+    FS_TICKLABEL  = 16
+    FS_LEGEND     = 18
+    FS_NA_TEXT    = 12
+
+    def _plot_one(ax, data, tp, bs):
+        x = np.arange(len(DATASETS))
+        for i, (key, color) in enumerate(METHODS):
+            offset = (i - (n_methods - 1) / 2) * width
+            vals = []
+            for ds in DATASETS:
+                v = data[(ds, bs)][key]
+                vals.append(v / 1000 if v is not None else np.nan)
+            ax.bar(x + offset, vals, width, color=color,
+                   label=METHOD_LABEL[key], edgecolor="black", linewidth=0.5)
+            for j, v in enumerate(vals):
+                if not np.isfinite(v):
+                    ax.text(x[j] + offset, 0, "N/A", ha="center", va="bottom",
+                            rotation=90, fontsize=FS_NA_TEXT, color=color, alpha=0.7)
+        ax.set_xticks(x)
+        ax.set_xticklabels(DATASETS, rotation=20, ha="right", fontsize=FS_TICKLABEL)
+        ax.set_title(f"TP={tp}  bs={bs}", fontsize=FS_SUBTITLE)
+        ax.grid(True, axis="y", alpha=0.3)
+        ax.tick_params(axis="y", labelsize=FS_TICKLABEL)
+
+    # ---- Figure 1: grid (rows = TP, cols = bs). Single PNG. ----
+    n_rows = len(tps)
+    n_cols = len(batch_sizes)
+    fig, axes = plt.subplots(n_rows, n_cols, figsize=(5.5 * n_cols, 5.5 * n_rows),
+                             sharey=False, squeeze=False)
+    handles_for_legend = None
+    for r, tp in enumerate(tps):
+        data = all_data[tp]
+        for c, bs in enumerate(batch_sizes):
+            ax = axes[r, c]
+            _plot_one(ax, data, tp, bs)
+            if c == 0:
+                ax.set_ylabel("50-batch e2e total (s)", fontsize=FS_AXISLABEL)
+            if handles_for_legend is None:
+                handles_for_legend = ax.get_legend_handles_labels()
+    fig.legend(*handles_for_legend, loc="upper center",
+               bbox_to_anchor=(0.5, 1.01), ncol=n_methods,
+               fontsize=FS_LEGEND, frameon=True, edgecolor="black")
+    fig.suptitle(f"{model} end-to-end offline latency",
+                 fontsize=FS_SUPTITLE, y=1.04)
+    plt.tight_layout()
+    out = FIG_DIR / "e2e_grid.png"
+    plt.savefig(out, dpi=150, bbox_inches="tight")
+    plt.close(fig)
+    print(f"  saved {out}")
+
+    # ---- Figure 2: per (TP, bs) separate PNGs. ----
+    per_dir = FIG_DIR / "per_tp_bs"
+    per_dir.mkdir(parents=True, exist_ok=True)
+    for tp in tps:
+        data = all_data[tp]
+        for bs in batch_sizes:
+            fig, ax = plt.subplots(figsize=(10, 6.5))
+            _plot_one(ax, data, tp, bs)
+            ax.set_ylabel("50-batch e2e total (s)", fontsize=FS_AXISLABEL)
+            ax.legend(loc="best", fontsize=FS_LEGEND,
+                      frameon=True, edgecolor="black")
+            fig.suptitle(f"{model} end-to-end offline latency",
+                         fontsize=FS_SUPTITLE)
+            plt.tight_layout()
+            out = per_dir / f"tp{tp}_bs{bs}.png"
+            plt.savefig(out, dpi=150, bbox_inches="tight")
+            plt.close(fig)
+    print(f"  saved {per_dir}/tp{{1,2}}_bs{{1,2,4,8,16,32}}.png "
+          f"({len(tps) * len(batch_sizes)} files)")
+
+
+# ---------------------------------------------------------------------------
+# Main
+# ---------------------------------------------------------------------------
 
 def main():
-    p = argparse.ArgumentParser()
-    p.add_argument("--model", default="Llama-3.2-1B")
-    p.add_argument("--tp", type=int, choices=[1, 2], required=True)
-    p.add_argument("--batch-sizes", default="1,2,4,8,16,32")
-    p.add_argument("--datasets", default=",".join(DATASETS))
-    p.add_argument("--no-csv", action="store_true",
-                   help="skip writing per-batch comparison CSV")
-    p.add_argument("--sim-subdir", default="sim",
-                   help="results/<sim-subdir>/<model>/... — use 'parallel_sim' "
-                        "if results were collected under a different subtree.")
+    p = argparse.ArgumentParser(description=__doc__,
+                                formatter_class=argparse.RawDescriptionHelpFormatter)
+    p.add_argument("--model", default="Llama-3.2-1B",
+                   help="Sim folder name (e.g. 'Llama-3.2-1B').")
     p.add_argument("--lens-model", default=None,
-                   help="LENS measurement folder name (lens_nxd/<this>/...). "
-                        "Default: <model>-Instruct, since measure_*.py uses "
-                        "the model_path basename which carries the -Instruct "
-                        "suffix while the simulator side typically does not.")
+                   help="LENS folder name. Default: '<model>-Instruct'.")
+    p.add_argument("--tps", default="1,2", help="Comma list (default: 1,2)")
+    p.add_argument("--batch-sizes", default="1,2,4,8,16,32",
+                   help="Comma list (default: 1,2,4,8,16,32)")
+    p.add_argument("--no-table", action="store_true")
+    p.add_argument("--no-figs", action="store_true")
     args = p.parse_args()
 
-    bsl = [int(x) for x in args.batch_sizes.split(",")]
-    dsl = [d.strip() for d in args.datasets.split(",") if d.strip()]
-    for ds in dsl:
-        for bs in bsl:
-            run_one(args.model, args.tp, bs, ds,
-                    write_csv=not args.no_csv,
-                    sim_subdir=args.sim_subdir,
-                    lens_model=args.lens_model)
+    lens_model = args.lens_model or f"{args.model}-Instruct"
+    tps = [int(x) for x in args.tps.split(",") if x]
+    bs_list = [int(x) for x in args.batch_sizes.split(",") if x]
+
+    all_data = {tp: collect(tp, bs_list, args.model, lens_model) for tp in tps}
+
+    if not args.no_table:
+        for tp in tps:
+            print_table(tp, all_data[tp], bs_list)
+
+    if not args.no_figs:
+        print()
+        print("=" * 90)
+        print("Figures")
+        print("=" * 90)
+        make_figures(tps, bs_list, all_data, args.model)
 
 
 if __name__ == "__main__":
