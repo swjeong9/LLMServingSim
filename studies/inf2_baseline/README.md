@@ -122,19 +122,22 @@ artifact 섹션 참고). 두 TP 모두 fair 측정 가능. TP=2 가 inf2.xlarge
 ```bash
 source /opt/aws_neuronx_venv_pytorch_2_9_nxd_inference/bin/activate
 
-# Wrapper: redirect each task's stdout/stderr to <out_dir>/<dataset>.log,
-# only print [done]/[FAIL] to the terminal. log lives next to the result
-# CSV so scp/rsync of results/lens_nxd/ pulls both.
+# Wrapper: tee each task's stdout/stderr to BOTH the terminal and
+# <out_dir>/<dataset>.log. Live progress visible while typing
+# nothing, file copy preserved for post-mortem (scp/rsync of
+# results/lens_nxd/ pulls log + CSV together). pipefail so the
+# python exit code (not tee's) decides done vs FAIL.
+set -o pipefail
 run_nxd() {
   local tp=$1 bs=$2 ds=$3 cd=$4
   local dir=studies/inf2_baseline/results/lens_nxd/Llama-3.2-1B-Instruct/tp${tp}/bs${bs}
   mkdir -p ${dir}
+  echo "=== [tp${tp} bs${bs} ${ds}] start $(date +%T) ==="
   if python studies/inf2_baseline/measure_nxd.py \
       --dataset ${ds} --batch-size ${bs} \
       --model ~/models/Llama-3.2-1B-Instruct \
       --tp-degree ${tp} --max-model-len 8192 \
-      --compiled-dir ${cd} \
-      > ${dir}/${ds}.log 2>&1
+      --compiled-dir ${cd} 2>&1 | tee ${dir}/${ds}.log
   then
     echo "[done] tp${tp} bs${bs} ${ds}"
   else
@@ -167,17 +170,18 @@ CONVERT_TO_MHA 가 TP=1 에서 발동될 가능성 — 측정 시 warning 확인
 ```bash
 source /opt/aws_neuronx_venv_<vllm-capable>/bin/activate
 
-# Same logging wrapper pattern as 2.b.
+# Same logging wrapper pattern as 2.b — tee to both terminal and log file.
+set -o pipefail
 run_vllm() {
   local tp=$1 bs=$2 ds=$3 cd=$4
   local dir=studies/inf2_baseline/results/lens_vllm/Llama-3.2-1B-Instruct/tp${tp}/bs${bs}
   mkdir -p ${dir}
+  echo "=== [tp${tp} bs${bs} ${ds}] start $(date +%T) ==="
   if python studies/inf2_baseline/measure_vllm.py \
       --dataset ${ds} --batch-size ${bs} \
       --model ~/models/Llama-3.2-1B-Instruct \
       --tp-degree ${tp} --max-model-len 8192 \
-      --compiled-dir ${cd} \
-      > ${dir}/${ds}.log 2>&1
+      --compiled-dir ${cd} 2>&1 | tee ${dir}/${ds}.log
   then
     echo "[done] tp${tp} bs${bs} ${ds}"
   else
