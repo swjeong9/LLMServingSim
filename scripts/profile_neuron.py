@@ -412,28 +412,75 @@ def shot_flops_bytes(category: str, layer: str, key: Dict[str, int],
 # ======================================================================
 # Synchronous Neuron-aware timing
 # ======================================================================
-def time_callable(fn: Callable[[], Any], warmup: int, repeat: int
+def time_callable(fn: Callable[[], Any], warmup: int, repeat: int,
+                  amortize: bool = True
                   ) -> Tuple[float, Dict[str, Any]]:
     """Time fn() on Neuron via XLA mark_step + wait.
 
-    Returns ``(mean_microseconds, meta)`` where ``meta`` has:
+    Two modes:
 
-      * ``first_call_us``  — wall time of the *first* warmup iteration.
-        On Neuron this is dominated by the first-time NEFF compile for
-        this shape (or near-zero if cache hit).
-      * ``mean_warmup_us`` — mean of warmup[1:] (post-compile),
-        useful as a sanity check vs ``mean_us``.
-      * ``mean_us``        — arithmetic mean of the timed phase (the
-        value used as the official measurement; with repeat=100 the
-        mean is stable enough that we don't need median's robustness).
-      * ``median_us``      — median of the timed phase (kept for
-        outlier detection; not used by the simulator).
-      * ``stdev_us``       — sample stdev of the timed phase.
-      * ``n_warmup`` / ``n_timed``
-      * ``wall_us``        — total wall time invested in this shot
-        (warmup + timed). Sums ≈ total profiling cost.
-      * ``compile_us``     — first_call_us - mean_us (best-effort
-        compile cost estimate; clamped to >= 0).
+    1. **Per-iter sync** (``amortize=False``, **default**)
+        Each fn() call is bracketed by sync()/sync()/perf_counter so each
+        sample is the wallclock of one forward + one sync. Pros: per-call
+        distribution metrics (mean / median / stdev). Cons: every call's
+        wallclock includes one full kernel-launch overhead. For very
+        cheap kernels (e.g. layernorm at 4 tokens, ~1us actual device
+        time) the launch overhead dominates and the measurement can be
+        100x inflated vs true device time.
+
+    2. **Loop-amortize** (``amortize=True``, opt-in via ``--amortize``)
+
+        WARNING: Empirically broken on Inferentia 2 (Neuron SDK 2.29).
+        PyTorch/XLA's lazy IR + HLO CSE+DCE collapses the N-fn-call
+        chain (same input + same weight → same hash → CSE folds 1000
+        ops to 1; refcount drops on prior `out` rebind → DCE prunes
+        the rest) BEFORE neuronx-cc sees the graph. Result: NEFF is
+        never compiled, the measurement is just PJRT dispatch +
+        sync handshake overhead (FLOPs-invariant). Verified
+        directly: 0 NEFFs in cache, 0 "Compilation Successfully
+        Completed" messages, identical wallclock for 4-token vs
+        1024-token shapes (256x FLOP difference).
+
+        Per-iter mode escapes this because each `sync()` materializes
+        `out` as a live device tensor and the lazy graph is rebuilt
+        from scratch each iteration — CSE has nothing to fold across
+        mark_step boundaries.
+
+        Kept under --amortize for cross-validation experiments only;
+        do not use as the default measurement path.
+        All ``repeat`` fn() calls are dispatched first, then a single
+        sync() at the end. We divide total wallclock by ``repeat``. The
+        lazy XLA graph cache should hit on the same N-fn-calls graph
+        across iterations, so per-call launch overhead is amortized
+        away. Pros: small kernels measured at near-true device time.
+        Cons: single wallclock per shot — no per-call distribution; needs
+        the lazy XLA graph cache to actually hit on the N-fn-calls graph
+        (some envs may miss every iteration; verify before trusting).
+
+    In both modes the warmup phase mirrors the timed phase exactly so
+    the graph the timed phase's cache lookup hits matches what warmup
+    built.
+
+    Returns:
+        ``(mean_microseconds, meta)``.
+
+        Common meta fields (always present):
+          * ``mean_us``    — arithmetic mean (per-call us) — official measurement.
+          * ``n_warmup`` / ``n_timed``
+          * ``wall_us``    — total wall time invested in this shot.
+          * ``amortize``   — bool, which mode was used.
+
+        Per-iter mode also fills:
+          * ``first_call_us``, ``mean_warmup_us``, ``median_us``,
+            ``stdev_us``, ``compile_us`` — per-call distribution and
+            best-effort compile cost estimate.
+
+        Amortize mode fills these defensively (with mean_us / 0):
+          * ``median_us`` = ``mean_us``, ``stdev_us`` = 0,
+            ``first_call_us`` = ``mean_us``, ``mean_warmup_us`` = ``mean_us``,
+            ``compile_us`` = 0 (cannot extract from a single batch
+            wallclock; first call's compile cost is hidden inside the
+            warmup batch).
 
     fn() must wrap whatever forward call we want to measure. Inputs
     should already live on the Neuron device.
@@ -441,6 +488,69 @@ def time_callable(fn: Callable[[], Any], warmup: int, repeat: int
     rt = _lazy_import_runtime()
     sync = _get_sync(rt)
 
+    if amortize:
+        # ---- amortize mode ----
+        # IMPORTANT for cache hit: the warmup batch and timed batch must
+        # contain the SAME number of fn() calls so they hash to the same
+        # N-fn-calls graph in lazy XLA's cache. If warmup=10 and
+        # repeat=1000, the warmup builds a 10-fn-calls graph and the
+        # timed phase's 1000-fn-calls graph is a fresh cache miss → timed
+        # batch pays cold compile cost and the measurement is garbage.
+        # Pass `--warmup $REPEAT` (same value as --repeat) to ensure both
+        # batches have the same shape. We measure both batch wallclocks
+        # so the user can verify cache hit:
+        #   - warmup_wall_us ≫ timed_wall_us  → cache hit OK (warmup
+        #     paid cold compile, timed got hot cache).
+        #   - warmup_wall_us ≈ timed_wall_us AND both small  → cache hit
+        #     OK and both batches mostly device time (best case).
+        #   - warmup_wall_us ≈ timed_wall_us AND both very large  → both
+        #     cold (cache miss; measurement is BAD).
+
+        # Warmup batch — timed too, for cache-hit diagnostics.
+        sync()
+        t0w = time.perf_counter_ns()
+        for _ in range(warmup):
+            out = fn()
+            del out
+        sync()
+        t1w = time.perf_counter_ns()
+        warmup_total_us = (t1w - t0w) / 1000.0
+        warmup_per_call_us = warmup_total_us / max(1, warmup)
+
+        # Timed batch — should be cache-hit if warmup == repeat.
+        sync()
+        t0 = time.perf_counter_ns()
+        for _ in range(repeat):
+            out = fn()
+            del out
+        sync()
+        t1 = time.perf_counter_ns()
+
+        total_us = (t1 - t0) / 1000.0
+        mean_us = total_us / max(1, repeat)
+
+        # Compile cost estimate: warmup paid cold compile + N device time;
+        # timed paid only N device time. Their difference ≈ compile cost.
+        # Clamp negatives (timing noise on tiny kernels).
+        compile_us = max(warmup_total_us - total_us, 0.0)
+
+        meta = {
+            "first_call_us":  warmup_per_call_us,   # warmup per-call (incl. compile/N)
+            "mean_warmup_us": warmup_per_call_us,
+            "mean_us":        mean_us,
+            "median_us":      mean_us,              # no per-call distribution
+            "stdev_us":       0.0,
+            "n_warmup":       warmup,
+            "n_timed":        repeat,
+            "wall_us":        warmup_total_us + total_us,
+            "warmup_wall_us": warmup_total_us,      # ← cache-hit diagnostic
+            "timed_wall_us":  total_us,             # ← cache-hit diagnostic
+            "compile_us":     compile_us,
+            "amortize":       True,
+        }
+        return mean_us, meta
+
+    # ---- per-iter sync mode (existing default) ----
     warmup_samples: List[float] = []
     timed_samples: List[float] = []
 
@@ -486,6 +596,7 @@ def time_callable(fn: Callable[[], Any], warmup: int, repeat: int
         "n_timed":        repeat,
         "wall_us":        wall_us,
         "compile_us":     compile_us,
+        "amortize":       False,
     }
     return mean_us, meta
 
@@ -679,7 +790,8 @@ def _eff_metrics(flops: float, bts: float, mean_us: float) -> Dict[str, float]:
 # Sweeps
 # ======================================================================
 def sweep_dense(state: "_RuntimeState", arch: str,
-                tokens_grid: Sequence[int], warmup: int, repeat: int
+                tokens_grid: Sequence[int], warmup: int, repeat: int,
+                amortize: bool = True,
                 ) -> Tuple[List[Tuple[str, int, float]], List[Dict[str, Any]]]:
     """Time each catalog dense layer at each token count.
 
@@ -703,7 +815,7 @@ def sweep_dense(state: "_RuntimeState", arch: str,
                 return outs
 
             try:
-                t_us, meta = time_callable(call, warmup, repeat)
+                t_us, meta = time_callable(call, warmup, repeat, amortize=amortize)
             except Exception as e:
                 print(f"    [WARN] dense {layer_name} n={n} failed: {e}")
                 continue
@@ -739,7 +851,8 @@ def sweep_dense(state: "_RuntimeState", arch: str,
 
 
 def sweep_per_sequence(state: "_RuntimeState", arch: str,
-                       sequences_grid: Sequence[int], warmup: int, repeat: int
+                       sequences_grid: Sequence[int], warmup: int, repeat: int,
+                       amortize: bool = True,
                        ) -> Tuple[List[Tuple[str, int, float]], List[Dict[str, Any]]]:
     """Time lm_head at each sequence count; synthesize sampler row."""
     rows: List[Tuple[str, int, float]] = []
@@ -754,7 +867,7 @@ def sweep_per_sequence(state: "_RuntimeState", arch: str,
                 return [m(x) for m in mods]
 
             try:
-                t_us, meta = time_callable(call, warmup, repeat)
+                t_us, meta = time_callable(call, warmup, repeat, amortize=amortize)
             except Exception as e:
                 print(f"    [WARN] per_seq {layer_name} s={s} failed: {e}")
                 continue
@@ -799,6 +912,7 @@ def sweep_attention(state: "_RuntimeState", arch: str,
                     kv_decode_grid: Sequence[int],
                     dense_rows: List[Tuple[str, int, float]],
                     warmup: int, repeat: int,
+                    amortize: bool = True,
                     ) -> Tuple[List[Tuple[int, int, int, int, float]], List[Dict[str, Any]]]:
     """SDPA kernel sweep over (prefill_chunk, kv_prefill, n_decode, kv_decode).
 
@@ -877,7 +991,7 @@ def sweep_attention(state: "_RuntimeState", arch: str,
                                                       is_causal=ic)
 
             try:
-                t_kernel, meta = time_callable(call, warmup, repeat)
+                t_kernel, meta = time_callable(call, warmup, repeat, amortize=amortize)
             except Exception as e:
                 print(f"    [WARN] attn prefill pc={pc} kv_p={kv_p} failed: {e}")
                 continue
@@ -913,7 +1027,7 @@ def sweep_attention(state: "_RuntimeState", arch: str,
                                                       is_causal=False)
 
             try:
-                t_kernel, meta = time_callable(call, warmup, repeat)
+                t_kernel, meta = time_callable(call, warmup, repeat, amortize=amortize)
             except Exception as e:
                 print(f"    [WARN] attn decode n={n} kv_d={kv_d} failed: {e}")
                 continue
@@ -1109,6 +1223,26 @@ def parse_args():
     # Measurement
     p.add_argument("--warmup", type=int, default=10)
     p.add_argument("--repeat", type=int, default=30)
+    p.add_argument("--amortize", default=True,
+                   action=argparse.BooleanOptionalAction,
+                   help="Loop-amortize mode (default OFF — broken on Neuron). "
+                        "When ON, dispatches all `--repeat` forward calls "
+                        "before a single sync and divides total wallclock by "
+                        "repeat — intended to amortize per-iter kernel-launch "
+                        "overhead. EMPIRICALLY BROKEN on Inferentia 2 (Neuron "
+                        "SDK 2.29): PyTorch/XLA's lazy IR + HLO CSE+DCE folds "
+                        "the N-fn-call chain to ~1 op before neuronx-cc sees "
+                        "the graph (same input + same weight → CSE collapse; "
+                        "refcount drops on `out` rebind → DCE prunes the "
+                        "rest). Result: NEFF never compiled, measurement is "
+                        "PJRT dispatch + sync handshake overhead (FLOPs-"
+                        "invariant — 4-token and 1024-token kernels measure "
+                        "identical wallclock). The default (--no-amortize, "
+                        "per-iter sync) escapes this because each sync() "
+                        "materializes `out` as a live tensor and the lazy "
+                        "graph is rebuilt fresh per iteration. Kept here for "
+                        "cross-validation experiments only; use the default "
+                        "for ground-truth NPU latency measurement.")
     p.add_argument("--reload-every", type=int, default=30,
                    help="Free + re-load the model after every N timed shots "
                         "to release accumulated Neuron NEFFs from HBM. "
@@ -1283,7 +1417,8 @@ def main():
                 state, arch,
                 prefill_grid, kv_prefill_grid,
                 decode_n_grid, kv_decode_grid,
-                [], args.warmup, args.repeat)   # dense_rows arg is unused inside
+                [], args.warmup, args.repeat,
+                amortize=args.amortize)   # dense_rows arg is unused inside
             stage_t["attn_sec"] = time.perf_counter() - sweep_t0
             stage_t["attn_reload_sec"] = state.take_reload_sec()
             stage_t["attn_compile_sec"], stage_t["attn_measure_sec"] = _stage_split(attn_shots)
@@ -1303,7 +1438,8 @@ def main():
             print("  -- dense sweep --")
             sweep_t0 = time.perf_counter()
             dense_rows, dense_shots = sweep_dense(state, arch,
-                                                  tokens_grid, args.warmup, args.repeat)
+                                                  tokens_grid, args.warmup, args.repeat,
+                                                  amortize=args.amortize)
             stage_t["dense_sec"] = time.perf_counter() - sweep_t0
             stage_t["dense_reload_sec"] = state.take_reload_sec()
             stage_t["dense_compile_sec"], stage_t["dense_measure_sec"] = _stage_split(dense_shots)
@@ -1323,7 +1459,8 @@ def main():
             print("  -- per_sequence sweep --")
             sweep_t0 = time.perf_counter()
             ps_rows, ps_shots = sweep_per_sequence(state, arch,
-                                                   sequences_grid, args.warmup, args.repeat)
+                                                   sequences_grid, args.warmup, args.repeat,
+                                                   amortize=args.amortize)
             stage_t["per_seq_sec"] = time.perf_counter() - sweep_t0
             stage_t["per_seq_reload_sec"] = state.take_reload_sec()
             stage_t["per_seq_compile_sec"], stage_t["per_seq_measure_sec"] = _stage_split(ps_shots)
@@ -1468,6 +1605,7 @@ def _capture_runtime_args(args) -> Dict[str, Any]:
         "decode_n_grid": args.decode_n_grid,
         "kv_decode_grid": args.kv_decode_grid,
         "warmup": args.warmup, "repeat": args.repeat,
+        "amortize": bool(args.amortize),
         "max_position_embeddings": args.max_position_embeddings,
         "skip_attention": args.skip_attention,
     }

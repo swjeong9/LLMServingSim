@@ -65,10 +65,20 @@ MAX_SEQ_LEN="${MAX_SEQ_LEN:-8192}"      # caps both tokens and kv axes
 DTYPE="${DTYPE:-bfloat16}"
 OUTPUT_ROOT="${OUTPUT_ROOT:-profiler/perf}"
 
-WARMUP="${WARMUP:-10}"
-REPEAT="${REPEAT:-100}"     # raised from 30 — forward latency is microseconds,
-                            # so 100 reps × 1 ms ~= 100 ms per shot extra cost
-                            # for noticeably tighter mean estimates.
+REPEAT="${REPEAT:-1000}"
+WARMUP="${WARMUP:-$REPEAT}"
+AMORTIZE="${AMORTIZE:-true}"  # "false" -> --no-amortize (per-iter sync)
+                              # "true"           -> --amortize (BROKEN on Neuron)
+                              # Loop-amortize was investigated as a way to remove
+                              # per-iter kernel-launch overhead. On Inferentia 2,
+                              # PyTorch/XLA's lazy IR + HLO CSE+DCE folds the
+                              # N-fn-call chain to ~1 op before neuronx-cc runs
+                              # — NEFF is never compiled and the measurement
+                              # becomes FLOPs-invariant (4-token == 1024-token).
+                              # Kept togglable for cross-validation experiments
+                              # only. Use the default for real measurements.
+                              # See profile_neuron.py --amortize/--no-amortize
+                              # docstring for the full mechanism + evidence.
 RELOAD_EVERY="${RELOAD_EVERY:-0}"        # 0 = NEVER reload mid-sweep.
                                         # Counter-intuitive but: Neuron Runtime
                                         # doesn't actually release the OLD model's
@@ -290,6 +300,14 @@ for spec in "${MODEL_TPS[@]}"; do
         --repeat "$REPEAT"
         --reload-every "$RELOAD_EVERY"
     )
+
+    # Amortize toggle. Pass it explicitly so the operator can flip it at
+    # the env-var level without editing the script.
+    if [[ "$AMORTIZE" == "true" ]]; then
+        base_args+=( --amortize )
+    else
+        base_args+=( --no-amortize )
+    fi
 
     for tp in "${tp_array[@]}"; do
         echo
