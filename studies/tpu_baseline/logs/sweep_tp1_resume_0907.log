@@ -1,0 +1,29 @@
+============================================================
+  profile_tpu.sh — JAX TPU sweep (subprocess per stage)
+============================================================
+  model        : meta-llama/Llama-3.2-1B-Instruct
+  tp_list      : 1   variant : bf16   hw : TPU-v6e-1
+  warmup/repeat: 5 / 30
+
+  dense tokens : 168 values (max=8192)
+  per_seq seqs : 287 values
+  prefill pc   : 115 values (max=8192)
+  decode kv    : 97 values × 6 batches = 582 combos
+  batch list   : [1 2 4 8 16 32]
+
+Press Ctrl-C in 3s to abort...
+
+############################################################
+  TP=1 — output: /home/swjeong/LLMServingSim/profiler/perf/TPU-v6e-1/meta-llama/Llama-3.2-1B-Instruct/bf16/tp1
+############################################################
+
+  [1/4] dense — SKIPPED (not in STAGES)
+
+  [2/4] per_sequence — 2 layers × 287 sequences  (chunk size 80)
+
+    --- lm_head ---
+      chunk 1 (80 values)  fresh
+WARNING:root:libtpu.so and TPU device found. Setting PJRT_DEVICE=TPU.
+[stage=per_seq] 2026-05-12T09:07:43  model=meta-llama/Llama-3.2-1B-Instruct tp=1 layer=lm_head
+  mcfg: NH=32 NKV=8 H=2048 HD=64 I=8192 V=128256  (V_raw=128256)
+per_seq:lm_head:   0%|          | 0/80 [00:00<?, ?m/s]per_seq:lm_head:   1%|▏         | 1/80 [00:12<17:06, 12.99s/m]per_seq:lm_head:   2%|▎         | 2/80 [00:19<12:16,  9.44s/m]per_seq:lm_head:   4%|▍         | 3/80 [00:26<10:39,  8.30s/m]per_seq:lm_head:   5%|▌         | 4/80 [00:33<09:47,  7.73s/m]per_seq:lm_head:   6%|▋         | 5/80 [00:40<09:18,  7.45s/m]per_seq:lm_head:   8%|▊         | 6/80 [00:47<08:56,  7.25s/m]per_seq:lm_head:   9%|▉         | 7/80 [00:54<08:42,  7.15s/m]per_seq:lm_head:  10%|█         | 8/80 [01:01<08:28,  7.06s/m]per_seq:lm_head:  11%|█▏        | 9/80 [01:08<08:21,  7.07s/m]per_seq:lm_head:  12%|█▎        | 10/80 [01:15<08:14,  7.07s/m]per_seq:lm_head:  14%|█▍        | 11/80 [01:22<08:04,  7.02s/m]per_seq:lm_head:  15%|█▌        | 12/80 [01:29<07:54,  6.98s/m]per_seq:lm_head:  16%|█▋        | 13/80 [01:36<07:46,  6.96s/m]per_seq:lm_head:  18%|█▊        | 14/80 [01:43<07:38,  6.95s/m]per_seq:lm_head:  19%|█▉        | 15/80 [01:50<07:34,  6.99s/m]per_seq:lm_head:  20%|██        | 16/80 [01:57<07:26,  6.97s/m]per_seq:lm_head:  21%|██▏       | 17/80 [02:04<07:21,  7.01s/m]per_seq:lm_head:  22%|██▎       | 18/80 [02:11<07:13,  7.00s/m]per_seq:lm_head:  24%|██▍       | 19/80 [02:18<07:06,  6.99s/m]per_seq:lm_head:  25%|██▌       | 20/80 [02:25<06:58,  6.98s/m]per_seq:lm_head:  26%|██▋       | 21/80 [02:32<06:51,  6.98s/m]per_seq:lm_head:  28%|██▊       | 22/80 [02:39<06:44,  6.97s/m]per_seq:lm_head:  29%|██▉       | 23/80 [02:46<06:37,  6.97s/m]per_seq:lm_head:  30%|███       | 24/80 [02:53<06:30,  6.97s/m]per_seq:lm_head:  31%|███▏      | 25/80 [03:00<06:34,  7.17s/m]per_seq:lm_head:  32%|███▎      | 26/80 [03:07<06:25,  7.13s/m]per_seq:lm_head:  34%|███▍      | 27/80 [03:14<06:16,  7.11s/m]per_seq:lm_head:  35%|███▌      | 28/80 [03:21<06:08,  7.09s/m]per_seq:lm_head:  36%|███▋      | 29/80 [03:28<06:01,  7.09s/m]per_seq:lm_head:  38%|███▊      | 30/80 [03:35<05:53,  7.07s/m]per_seq:lm_head:  39%|███▉      | 31/80 [03:43<05:46,  7.07s/m]per_seq:lm_head:  40%|████      | 32/80 [03:50<05:39,  7.06s/m]per_seq:lm_head:  41%|████▏     | 33/80 [03:58<05:51,  7.47s/m]per_seq:lm_head:  42%|████▎     | 34/80 [04:05<05:40,  7.39s/m]per_seq:lm_head:  44%|████▍     | 35/80 [04:15<06:06,  8.15s/m]per_seq:lm_head:  45%|████▌     | 36/80 [04:23<05:57,  8.12s/m]per_seq:lm_head:  46%|████▋     | 37/80 [04:31<05:45,  8.03s/m]per_seq:lm_head:  48%|████▊     | 38/80 [04:40<05:48,  8.29s/m]per_seq:lm_head:  49%|████▉     | 39/80 [04:48<05:32,  8.11s/m]per_seq:lm_head:  50%|█████     | 40/80 [04:55<05:19,  7.98s/m]per_seq:lm_head:  51%|█████▏    | 41/80 [05:03<05:07,  7.88s/m]per_seq:lm_head:  52%|█████▎    | 42/80 [05:12<05:07,  8.11s/m]
