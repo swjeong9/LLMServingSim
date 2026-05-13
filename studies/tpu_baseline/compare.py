@@ -1,11 +1,17 @@
 #!/usr/bin/env python3
-"""3-way 50-batch end-to-end wallclock comparison + figures.
+"""3-way 50-batch end-to-end comparison + figures (TPU baseline).
 
-LENS-NxD vs LENS-vLLM vs LLMServingSim.
-
-Each LENS run = 50 sequential batches; total = sum(per-batch_e2e_ms)
-(averaged over n_runs replicates if any).
-Sim total = max(end_time) - min(arrival), ns -> ms.
+Compares per (ds, bs) three sources:
+  * sim_wallclock — LLMServingSim total = max(end_time) - min(arrival).
+                     One continuous-batched session view; the sim's
+                     ability to overlap requests across batch
+                     boundaries pulls this DOWN vs LENS, which has
+                     hard batch boundaries.
+  * sim_per_run   — LLMServingSim total = sum(end_time - arrival) per row.
+                     Sum-of-per-request-latency framing that lines up
+                     1:1 with LENS's sum-of-per-batch e2e.
+  * vllm          — LENS-vLLM (TPU Pallas) total = sum(per-batch_e2e_ms),
+                     averaged over n_runs replicates if any.
 
 Usage:
     python compare.py                       # all TPs, all bs, all ds + figures
@@ -46,8 +52,12 @@ def lens_total(path: Path) -> Optional[float]:
     return sum(statistics.fmean(v) for v in by_batch.values())
 
 
-def sim_total(path: Path) -> Optional[float]:
-    """max(end_time) - min(arrival), ns -> ms."""
+def sim_total(path: Path, mode: str = "wallclock") -> Optional[float]:
+    """Aggregate the sim CSV into one total-ms number.
+
+    mode="wallclock" → max(end_time) - min(arrival), ns -> ms.
+    mode="per_run"   → sum(end_time - arrival) over rows, ns -> ms.
+    """
     if not path.exists():
         return None
     arrivals: list[int] = []
@@ -58,18 +68,24 @@ def sim_total(path: Path) -> Optional[float]:
             ends.append(int(r["end_time"]))
     if not arrivals:
         return None
-    return (max(ends) - min(arrivals)) / 1e6
+    if mode == "wallclock":
+        return (max(ends) - min(arrivals)) / 1e6
+    if mode == "per_run":
+        return sum(e - a for e, a in zip(ends, arrivals)) / 1e6
+    raise ValueError(f"unknown sim mode: {mode!r}")
 
 
 def collect(tp: int, batch_sizes, model: str, lens_model: str) -> dict:
-    """Return {(ds, bs): {'sim', 'tpu', 'vllm'}} for one TP."""
+    """Return {(ds, bs): {'sim_wallclock', 'sim_per_run', 'vllm'}} for one TP."""
     out = {}
     for ds in DATASETS:
         for bs in batch_sizes:
+            sim_path  = ROOT / f"sim/{model}/tp{tp}/bs{bs}/{ds}.csv"
+            vllm_path = ROOT / f"lens_vllm/{lens_model}/tp{tp}/bs{bs}/{ds}.csv"
             out[(ds, bs)] = {
-                "sim":  sim_total(ROOT / f"sim/{model}/tp{tp}/bs{bs}/{ds}.csv"),
-                "tpu":  lens_total(ROOT / f"lens_tpu/{lens_model}/tp{tp}/bs{bs}/{ds}.csv"),
-                "vllm": lens_total(ROOT / f"lens_vllm/{lens_model}/tp{tp}/bs{bs}/{ds}.csv"),
+                "sim_wallclock": sim_total(sim_path, mode="wallclock"),
+                "sim_per_run":   sim_total(sim_path, mode="per_run"),
+                "vllm":          lens_total(vllm_path),
             }
     return out
 
@@ -80,24 +96,28 @@ def collect(tp: int, batch_sizes, model: str, lens_model: str) -> dict:
 
 def print_table(tp: int, data, batch_sizes):
     print()
-    print("=" * 90)
-    print(f"TP={tp}  —  50-batch e2e total wallclock (ms)")
-    print("=" * 90)
-    h_ds, h_bs = "dataset", "bs"
-    h_sim, h_tpu, h_vllm = "sim", "tpu", "vllm"
-    h_sn, h_sv = "sim/maxtext", "sim/vllm"
-    print(f"{h_ds:<16} {h_bs:>3}  {h_sim:>10}  {h_tpu:>10}  {h_vllm:>10}  {h_sn:>9}  {h_sv:>9}")
-    print("-" * 90)
+    print("=" * 100)
+    print(f"TP={tp}  —  50-batch e2e total (ms)  + sim/vllm diff% per sim mode")
+    print("=" * 100)
+    header = ["dataset", "bs", "sim_wc", "sim_pr", "vllm",
+              "wc/vllm", "pr/vllm"]
+    widths = [16, 3, 11, 11, 11, 10, 10]
+    print("  ".join(f"{c:<{w}}" if i < 2 else f"{c:>{w}}"
+                    for i, (c, w) in enumerate(zip(header, widths))))
+    print("-" * 100)
     for ds in DATASETS:
         for bs in batch_sizes:
             d = data[(ds, bs)]
-            s, n, v = d["sim"], d["tpu"], d["vllm"]
-            ss = f"{s:>10.1f}" if s is not None else f'{"-":>10}'
-            ns = f"{n:>10.1f}" if n is not None else f'{"-":>10}'
-            vs = f"{v:>10.1f}" if v is not None else f'{"-":>10}'
-            sn = f"{(s-n)/n*100:+8.1f}%" if (s is not None and n) else f'{"-":>9}'
-            sv = f"{(s-v)/v*100:+8.1f}%" if (s is not None and v) else f'{"-":>9}'
-            print(f"{ds:<16} {bs:>3}  {ss}  {ns}  {vs}  {sn}  {sv}")
+            wc, pr, v = d["sim_wallclock"], d["sim_per_run"], d["vllm"]
+            cells = [f"{ds:<16}", f"{bs:>3}"]
+            for x in (wc, pr, v):
+                cells.append(f"{x:>11.1f}" if x is not None else f'{"-":>11}')
+            for s in (wc, pr):
+                if s is not None and v:
+                    cells.append(f"{(s - v) / v * 100:+9.1f}%")
+                else:
+                    cells.append(f'{"-":>10}')
+            print("  ".join(cells))
         print()
 
 
@@ -107,16 +127,20 @@ def print_table(tp: int, data, batch_sizes):
 
 def make_figures(tps, batch_sizes, all_data, model):
     """Grouped bar charts: per (TP, bs) subplot, x = 4 datasets,
-    3 bars per dataset (sim / lens_tpu / lens_vllm)."""
+    3 bars per dataset (sim wallclock / sim per-run / lens_vllm)."""
     import matplotlib.pyplot as plt
     import numpy as np
 
     FIG_DIR.mkdir(parents=True, exist_ok=True)
 
-    METHODS = (("sim", "tab:blue"), ("tpu", "tab:orange"), ("vllm", "tab:green"))
-    METHOD_LABEL = {"sim": "LLMServingSim2.0", "tpu": "MaxText", "vllm": "vLLM"}
+    METHODS = (("sim_wallclock", "tab:blue"),
+               ("sim_per_run",   "tab:cyan"),
+               ("vllm",          "tab:green"))
+    METHOD_LABEL = {"sim_wallclock": "LLMServingSim2.0 (wallclock)",
+                    "sim_per_run":   "LLMServingSim2.0 (per-run)",
+                    "vllm":          "vLLM"}
     n_methods = len(METHODS)
-    width = 0.27   # per-bar width within a dataset group
+    width = 0.27   # narrower per-bar width to fit 3 bars per group
 
     # Font sizes
     FS_SUPTITLE   = 24
