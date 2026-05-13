@@ -50,7 +50,7 @@ run_vllm() {
     LAST_TASK="${HARDWARE}/${OPT} tp${tp} bs${bs} ${ds}  (log: ${dir}/${ds}.log)"
     mkdir -p "${dir}"
     echo "=== [${HARDWARE}/${OPT} tp${tp} bs${bs} ${ds}] start $(date +%T) ==="
-    python studies/gpu_baseline/measure_vllm.py \
+    python3 studies/gpu_baseline/measure_vllm.py \
             --dataset "${ds}" --batch-size "${bs}" \
             --model "${MODEL}" \
             --hardware "${HARDWARE}" \
