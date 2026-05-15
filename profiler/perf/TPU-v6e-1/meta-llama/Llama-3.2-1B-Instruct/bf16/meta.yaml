@@ -6,49 +6,29 @@ profiled_at: '2026-05-11T16:00:00+00:00'
 architecture: llama
 model: meta-llama/Llama-3.2-1B-Instruct
 variant: bf16
-tp_degrees:
-- 1
-engine_effective:
-  max_num_batched_tokens: 3072
-  max_num_seqs: 256
-  dtype: bfloat16
-  kv_cache_dtype: auto
-  block_size: 16
-  num_hidden_layers_profiled: 1
+tp_degrees: [1]
+engine_effective: {max_num_batched_tokens: 8192, max_num_seqs: 32, dtype: bfloat16, kv_cache_dtype: auto, block_size: 16,
+  num_hidden_layers_profiled: 1, per_sequence_max_sequences: 8192}
+dense_grid:
+  tokens: {min: 1, max: 8192, step: 1, n_unique: 8192}
+  layers: [act_fn, down_proj, embedding, final_layernorm, gate_up_proj, layernorm, o_proj, qkv_proj, rotary_emb]
+per_sequence_grid:
+  sequences: {min: 1, max: 8192, n_unique: 287}
+  layers: [lm_head, sampler]
 attention_grid:
-  max_kv: 2048
-  prefill_chunk: 1, 32, 64, 96, 128, 160, 192, 224, 256, 288, 320, 352, 384, 416,
-    448, 480, 512, 544, 576, 608, 640, 672, 704, 736, 768, 800, 832, 864, 896, 928,
-    960, 992, 1024, 1056, 1088, 1120, 1152, 1184, 1216, 1248, 1280, 1312, 1344, 1376,
-    1408, 1440, 1472, 1504, 1536, 1568, 1600, 1632, 1664, 1696, 1728, 1760, 1792,
-    1824, 1856, 1888, 1920, 1952, 1984, 2016, 2048, 2080, 2112, 2144, 2176, 2208,
-    2240, 2272, 2304, 2336, 2368, 2400, 2432, 2464, 2496, 2528, 2560, 2592, 2624,
-    2656, 2688, 2720, 2752, 2784, 2816, 2848, 2880, 2912, 2944, 2976, 3008, 3040,
-    3072
-  kv_prefill: '0'
-  n_decode: '1'
-  kv_decode: 1, 32, 64, 96, 128, 160, 192, 224, 256, 288, 320, 352, 384, 416, 448,
-    480, 512, 544, 576, 608, 640, 672, 704, 736, 768, 800, 832, 864, 896, 928, 960,
-    992, 1024, 1056, 1088, 1120, 1152, 1184, 1216, 1248, 1280, 1312, 1344, 1376,
-    1408, 1440, 1472, 1504, 1536, 1568, 1600, 1632, 1664, 1696, 1728, 1760, 1792,
-    1824, 1856, 1888, 1920, 1952, 1984, 2016, 2048
+  prefill_chunk: {min: 1, max: 8192, step: 1, n_unique: 8192}
+  kv_prefill: [0]
+  n_decode: [1, 2, 4, 8, 16, 32]
+  kv_decode: {min: 1, max: 4096, step: 1, n_unique: 4096}
+  kv_decode_max_per_batch: {1: 4096, 2: 4096, 4: 4096, 8: 4096, 16: 4096, 32: 4096}
+  max_kv: 4096
 skew_fit:
   per_tp:
-    1:
-      method: synthetic-constant
-      alpha_default: 0.3
-calibration:
-  scaling_factor: 1.0
-  scaled_by: raw TPU notebook output (no scaling applied; .scaled_1.00.csv source)
-notes: |
-  Converted from v1 TPU notebook CSV (single per-model CSV with layer_name,
-  input, kv_cache, latency(ns)) via /tmp/convert_tpu_v1_to_v2.py. Mapping:
-    - layernorm  = input_layernorm + post_layernorm  (sum)
-    - qkv_proj   = q_proj + k_proj + v_proj          (sum)
-    - gate_up_proj = gate_proj + up_proj             (sum)
-    - rotary_emb / sampler = analytic synthesize (no source measurement)
-  attention.csv key conversion:
-    - (input=N, kv=0)  -> (pc=N, kvp=0, n=0, kvd=0)   prefill
-    - (input=1, kv=K)  -> (pc=0, kvp=0, n=1, kvd=K)   decode
-  Measurement floor (TPU notebook mechanism): ~40us dense, ~240us attention.
-  Small layers at small token counts are dominated by floor — see HISTORY note.
+    1: {method: synthetic-constant, alpha_default: 0.3}
+calibration: {scaling_factor: 1.0, scaled_by: raw TPU notebook output (no scaling applied; .scaled_1.00.csv source)}
+notes: "Converted from v1 TPU notebook CSV (single per-model CSV with layer_name,\ninput, kv_cache, latency(ns)) via /tmp/convert_tpu_v1_to_v2.py.\
+  \ Mapping:\n  - layernorm  = input_layernorm + post_layernorm  (sum)\n  - qkv_proj   = q_proj + k_proj + v_proj        \
+  \  (sum)\n  - gate_up_proj = gate_proj + up_proj             (sum)\n  - rotary_emb / sampler = analytic synthesize (no source\
+  \ measurement)\nattention.csv key conversion:\n  - (input=N, kv=0)  -> (pc=N, kvp=0, n=0, kvd=0)   prefill\n  - (input=1,\
+  \ kv=K)  -> (pc=0, kvp=0, n=1, kvd=K)   decode\nMeasurement floor (TPU notebook mechanism): ~40us dense, ~240us attention.\n\
+  Small layers at small token counts are dominated by floor \u2014 see HISTORY note.\n"
