@@ -1,0 +1,234 @@
+[output] /app/LLMServingSim/studies/tpu_baseline/results/lens_vllm_continuous/Llama-3.2-1B-Instruct/tp1/bs2
+[2026-05-15 02:13:34.444929] loaded 100 requests (batch=2 × 50) from /app/LLMServingSim/studies/tpu_baseline/data/datasets/cnn.csv
+INFO 05-15 02:13:36 [__init__.py:59] TPU info: node_name=swj-v6e-measure-continuous | tpu_type=v6e-1 | worker_id=0 | num_chips=1 | num_cores_per_chip=1
+WARNING:absl:Tensorflow library not found, tensorflow.io.gfile operations will use native shim calls. GCS paths (i.e. 'gs://...') cannot be accessed.
+INFO 05-15 02:13:41 [tpu_platform.py:152] Automatically using fp8_e5m2 for FP8 KV cache on TPU v6e.
+[init_llm] model=meta-llama/Llama-3.2-1B-Instruct
+  tp=1 batch=2 max_model_len=8192
+  dtype=bfloat16  prefix_caching=False  chunked_prefill=False  max_num_batched_tokens=8192
+INFO 05-15 02:13:42 [attention_interface.py:53] Using default RPA kernel
+INFO 05-15 02:13:42 [importing.py:44] Triton is installed but 0 active driver(s) found (expected 1). Disabling Triton to prevent runtime errors.
+INFO 05-15 02:13:42 [importing.py:68] Triton not installed or not compatible; certain GPU-related functions will not be available.
+WARNING 05-15 02:13:42 [interface.py:240] Failed to import from vllm._C: ModuleNotFoundError("No module named 'vllm._C'")
+INFO 05-15 02:13:43 [tpu_platform.py:152] Automatically using fp8_e5m2 for FP8 KV cache on TPU v6e.
+INFO 05-15 02:13:43 [tpu_platform.py:152] Automatically using fp8_e5m2 for FP8 KV cache on TPU v6e.
+INFO 05-15 02:13:43 [tpu_platform.py:152] Automatically using fp8_e5m2 for FP8 KV cache on TPU v6e.
+INFO 05-15 02:13:43 [tpu_platform.py:152] Automatically using fp8_e5m2 for FP8 KV cache on TPU v6e.
+INFO 05-15 02:13:43 [__init__.py:110] Registered model loader `<class 'tpu_inference.models.jax.utils.weight_utils.JaxDummyModelLoader'>` with load format `jax_dummy`
+INFO 05-15 02:13:43 [__init__.py:110] Registered model loader `<class 'tpu_inference.models.common.pathways_dummy_loader.PathwaysDummyModelLoader'>` with load format `pathways_dummy`
+WARNING 05-15 02:13:43 [__init__.py:85] The quantization method 'awq' already exists and will be overwritten by the quantization config <class 'tpu_inference.layers.vllm.quantization.awq.VllmAWQConfig'>.
+WARNING 05-15 02:13:44 [__init__.py:85] The quantization method 'compressed-tensors' already exists and will be overwritten by the quantization config <class 'tpu_inference.layers.vllm.quantization.compressed_tensors.compressed_tensors.VllmCompressedTensorsConfig'>.
+WARNING 05-15 02:13:44 [__init__.py:85] The quantization method 'fp8' already exists and will be overwritten by the quantization config <class 'tpu_inference.layers.vllm.quantization.fp8.VllmFp8Config'>.
+WARNING 05-15 02:13:44 [__init__.py:85] The quantization method 'gpt_oss_mxfp4' already exists and will be overwritten by the quantization config <class 'tpu_inference.layers.vllm.quantization.mxfp4.VllmMxfp4Config'>.
+INFO 05-15 02:13:44 [__init__.py:110] Registered model loader `<class 'tpu_inference.models.vllm.vllm_model_loader.IncrementalModelLoader'>` with load format `tpu_streaming_loader`
+WARNING 05-15 02:13:44 [__init__.py:99] Load format `runai_streamer` is already registered, and will be overwritten by the new loader class `<class 'tpu_inference.models.vllm.vllm_model_loader.RunaiIncrementalModelLoader'>`.
+INFO 05-15 02:13:44 [__init__.py:110] Registered model loader `<class 'tpu_inference.models.vllm.vllm_model_loader.RunaiIncrementalModelLoader'>` with load format `runai_streamer`
+WARNING 05-15 02:13:44 [interface.py:240] Failed to import from vllm._C: ModuleNotFoundError("No module named 'vllm._C'")
+WARNING 05-15 02:13:44 [interface.py:240] Failed to import from vllm._C: ModuleNotFoundError("No module named 'vllm._C'")
+WARNING 05-15 02:13:44 [interface.py:240] Failed to import from vllm._C: ModuleNotFoundError("No module named 'vllm._C'")
+WARNING:root:Duplicate op registration for aten.__and__
+INFO 05-15 02:13:44 [utils.py:233] non-default args: {'dtype': 'bfloat16', 'max_model_len': 8192, 'enable_prefix_caching': False, 'max_num_batched_tokens': 8192, 'max_num_seqs': 2, 'disable_log_stats': True, 'enable_chunked_prefill': False, 'model': 'meta-llama/Llama-3.2-1B-Instruct'}
+INFO 05-15 02:13:44 [model.py:554] Resolved architecture: LlamaForCausalLM
+INFO 05-15 02:13:44 [model.py:1685] Using max model len 8192
+WARNING 05-15 02:13:44 [arg_utils.py:2253] This model does not officially support disabling chunked prefill. Disabling this manually may cause the engine to crash or produce incorrect outputs.
+INFO 05-15 02:13:44 [vllm.py:834] Asynchronous scheduling is enabled.
+INFO 05-15 02:13:44 [kernel.py:199] Final IR op priority after setting platform defaults: IrOpPriorityConfig(rms_norm=['native'])
+INFO 05-15 02:13:44 [tpu_platform.py:190] Initialized sharding configuration: ShardingConfigManager(total_devices=1, sharding_strategy=ShardingStrategy(tensor_parallelism=1, expert_parallelism=1, sequence_parallelism=1, data_parallelism=1, attention_data_parallelism=1, attention_data_expert_parallelism=1), device_indexes=None)
+INFO 05-15 02:13:44 [tpu_platform.py:245] Using KV cache block size: 256
+INFO 05-15 02:13:44 [tpu_platform.py:256] Force using UniProcExecutor for JAX on single host without pipeline parallelism.
+INFO 05-15 02:13:44 [compilation.py:294] Enabled custom fusions: norm_quant, act_quant
+(EngineCore pid=7473) INFO 05-15 02:13:45 [core.py:107] Initializing a V1 LLM engine (v0.19.1rc1.dev379+g251c18d1f) with config: model='meta-llama/Llama-3.2-1B-Instruct', speculative_config=None, tokenizer='meta-llama/Llama-3.2-1B-Instruct', skip_tokenizer_init=False, tokenizer_mode=auto, revision=None, tokenizer_revision=None, trust_remote_code=False, dtype=torch.bfloat16, max_seq_len=8192, download_dir=None, load_format=auto, tensor_parallel_size=1, pipeline_parallel_size=1, data_parallel_size=1, decode_context_parallel_size=1, dcp_comm_backend=ag_rs, disable_custom_all_reduce=True, quantization=None, quantization_config=None, enforce_eager=False, enable_return_routed_experts=False, kv_cache_dtype=auto, device_config=None, structured_outputs_config=StructuredOutputsConfig(backend='auto', disable_any_whitespace=False, disable_additional_properties=False, reasoning_parser='', reasoning_parser_plugin='', enable_in_reasoning=False), observability_config=ObservabilityConfig(show_hidden_metrics_for_version=None, otlp_traces_endpoint=None, collect_detailed_traces=None, kv_cache_metrics=False, kv_cache_metrics_sample=0.01, cudagraph_metrics=False, enable_layerwise_nvtx_tracing=False, enable_mfu_metrics=False, enable_mm_processor_stats=False, enable_logging_iteration_details=False), seed=0, served_model_name=meta-llama/Llama-3.2-1B-Instruct, enable_prefix_caching=False, enable_chunked_prefill=False, pooler_config=None, compilation_config={'mode': <CompilationMode.DYNAMO_TRACE_ONCE: 2>, 'debug_dump_path': None, 'cache_dir': '', 'compile_cache_save_format': 'binary', 'backend': 'openxla', 'custom_ops': ['all'], 'ir_enable_torch_wrap': False, 'splitting_ops': [], 'compile_mm_encoder': False, 'cudagraph_mm_encoder': False, 'encoder_cudagraph_token_budgets': [], 'encoder_cudagraph_max_vision_items_per_batch': 0, 'encoder_cudagraph_max_frames_per_batch': 0, 'compile_sizes': None, 'compile_ranges_endpoints': [8192], 'inductor_compile_config': {'enable_auto_functionalized_v2': False, 'size_asserts': False, 'alignment_asserts': False, 'scalar_asserts': False, 'combo_kernels': True, 'benchmark_combo_kernel': True}, 'inductor_passes': {}, 'cudagraph_mode': <CUDAGraphMode.NONE: 0>, 'cudagraph_num_of_warmups': 0, 'cudagraph_capture_sizes': None, 'cudagraph_copy_inputs': False, 'cudagraph_specialize_lora': True, 'use_inductor_graph_partition': False, 'pass_config': {'fuse_norm_quant': True, 'fuse_act_quant': True, 'fuse_attn_quant': False, 'enable_sp': False, 'fuse_gemm_comms': False, 'fuse_allreduce_rms': False}, 'max_cudagraph_capture_size': None, 'dynamic_shapes_config': {'type': <DynamicShapesType.BACKED: 'backed'>, 'evaluate_guards': False, 'assume_32_bit_indexing': False}, 'local_cache_dir': None, 'fast_moe_cold_start': True, 'static_all_moe_layers': []}, kernel_config=KernelConfig(ir_op_priority=IrOpPriorityConfig(rms_norm=['native']), enable_flashinfer_autotune=True, moe_backend='auto')
+(EngineCore pid=7473) WARNING 05-15 02:13:46 [tpu_platform.py:317] Pin memory is not supported on TPU.
+(EngineCore pid=7473) INFO 05-15 02:13:47 [parallel_state.py:1400] world_size=1 rank=0 local_rank=0 distributed_init_method=file:///tmp/tmpgf1lp2c5 backend=gloo
+[Gloo] Rank 0 is connected to 0 peer ranks. Expected number of connected peer ranks is : 0
+[Gloo] Rank 0 is connected to 0 peer ranks. Expected number of connected peer ranks is : 0
+[Gloo] Rank 0 is connected to 0 peer ranks. Expected number of connected peer ranks is : 0
+[Gloo] Rank 0 is connected to 0 peer ranks. Expected number of connected peer ranks is : 0
+[Gloo] Rank 0 is connected to 0 peer ranks. Expected number of connected peer ranks is : 0
+[Gloo] Rank 0 is connected to 0 peer ranks. Expected number of connected peer ranks is : 0
+[Gloo] Rank 0 is connected to 0 peer ranks. Expected number of connected peer ranks is : 0
+(EngineCore pid=7473) INFO 05-15 02:13:47 [parallel_state.py:1713] rank 0 in world size 1 is assigned as DP rank 0, PP rank 0, PCP rank 0, TP rank 0, EP rank N/A, EPLB rank N/A
+(EngineCore pid=7473) INFO 05-15 02:13:48 [tpu_runner.py:322] Init mesh | mesh=Mesh('data': 1, 'model': 1, axis_types=(Auto, Auto))
+(EngineCore pid=7473) INFO 05-15 02:13:48 [utils.py:95] Prepared token paddings: [16, 32, 64, 128, 256, 512, 1024, 2048, 4096, 8192]
+(EngineCore pid=7473) INFO 05-15 02:13:48 [utils.py:61] Prepared request paddings: [8]
+(EngineCore pid=7473) INFO 05-15 02:13:48 [compilation_manager.py:52] Enabling JAX compile cache.
+(EngineCore pid=7473) INFO 05-15 02:13:48 [tpu_worker.py:306] Init worker | rank=0 | is_first_rank=True | is_last_rank=True | topology_order_id=0 | is_driver_worker=True | hbm=[(0.0, 31.25)]GiB |self.devices=[TpuDevice(id=0, process_index=0, coords=(0,0,0), core_on_chip=0)] | total devices=[TpuDevice(id=0, process_index=0, coords=(0,0,0), core_on_chip=0)] | local_devices=[TpuDevice(id=0, process_index=0, coords=(0,0,0), core_on_chip=0)]
+(EngineCore pid=7473) INFO 05-15 02:13:48 [model_loader.py:473] Loading model with MODEL_IMPL_TYPE=auto
+(EngineCore pid=7473) INFO 05-15 02:13:48 [model_loader.py:476] Resolved MODEL_IMPL_TYPE 'auto' to 'flax_nnx'
+(EngineCore pid=7473) INFO 05-15 02:13:49 [weight_utils.py:151] Downloading weights from HF meta-llama/Llama-3.2-1B-Instruct
+(EngineCore pid=7473) INFO 05-15 02:13:49 [weight_utils.py:173] Loading weights from /root/.cache/huggingface/hub/models--meta-llama--Llama-3.2-1B-Instruct/snapshots/9213176726f574b556790deb65791e0c5aa438b6/model.safetensors
+(EngineCore pid=7473) INFO 05-15 02:13:51 [tpu_runner.py:601] Init model | hbm=[(2.3, 31.25)]GiB
+(EngineCore pid=7473) INFO 05-15 02:13:51 [tpu_worker.py:340] Memory statistics | total_hbm_limit_gb=31.25GiB | total_hbm_limit_cap_gb=28.12GiB | total_hbm_used_gb=2.3GiB | total_hbm_avail_gb=25.82GiB
+(EngineCore pid=7473) INFO 05-15 02:13:51 [kv_cache_utils.py:1319] GPU KV cache size: 845,824 tokens
+(EngineCore pid=7473) INFO 05-15 02:13:51 [kv_cache_utils.py:1324] Maximum concurrency for 8,192 tokens per request: 103.25x
+(EngineCore pid=7473) INFO 05-15 02:13:51 [compilation_manager.py:550] Compiling sampling with different input shapes.
+(EngineCore pid=7473) INFO 05-15 02:13:51 [compilation_manager.py:85] Precompile worker0 sample --> {'num_reqs': 8, 'do_sampling': True}
+W0515 02:13:51.982687    7473 pjrt_executable.cc:642] Assume version compatibility. PjRt-IFRT does not track XLA executable versions.
+(EngineCore pid=7473) INFO 05-15 02:13:51 [compilation_manager.py:90] Compilation finished in 0.11 [secs].
+(EngineCore pid=7473) INFO 05-15 02:13:52 [compilation_manager.py:85] Precompile worker0 sample --> {'num_reqs': 8, 'do_sampling': True}
+W0515 02:13:52.082174    7473 pjrt_executable.cc:642] Assume version compatibility. PjRt-IFRT does not track XLA executable versions.
+(EngineCore pid=7473) INFO 05-15 02:13:52 [compilation_manager.py:90] Compilation finished in 0.07 [secs].
+(EngineCore pid=7473) INFO 05-15 02:13:52 [compilation_manager.py:85] Precompile worker0 sample --> {'num_reqs': 8, 'do_sampling': False}
+(EngineCore pid=7473) INFO 05-15 02:13:52 [compilation_manager.py:90] Compilation finished in 0.40 [secs].
+(EngineCore pid=7473) INFO 05-15 02:13:52 [compilation_manager.py:85] Precompile worker0 sample --> {'num_reqs': 8, 'do_sampling': False}
+(EngineCore pid=7473) INFO 05-15 02:13:52 [compilation_manager.py:90] Compilation finished in 0.40 [secs].
+(EngineCore pid=7473) INFO 05-15 02:13:52 [compilation_manager.py:639] Compiling gather_logprobs with different input shapes.
+(EngineCore pid=7473) INFO 05-15 02:13:52 [compilation_manager.py:85] Precompile worker0 gather_logprobs --> {'num_reqs': 8}
+(EngineCore pid=7473) INFO 05-15 02:13:53 [compilation_manager.py:90] Compilation finished in 0.61 [secs].
+(EngineCore pid=7473) INFO 05-15 02:13:55 [kv_cache_manager.py:531] Init kv-cache | num_total_layers=16 | num_blocks=[3304, 3304, 3304, 3304, 3304, 3304, 3304, 3304, 3304, 3304, 3304, 3304, 3304, 3304, 3304, 3304] | regular_attn_layers=16 | regular_attn_shape=(num_blocks, (256, 4, 2, 128)) | regular_attn_sharding=NamedSharding(mesh=Mesh('data': 1, 'model': 1, axis_types=(Auto, Auto)), spec=P('data', None, 'model'), memory_kind=device) | regular_attn_dtype=bfloat16 | hbm=[(28.12, 31.25)]Gb
+(EngineCore pid=7473) INFO 05-15 02:13:55 [compilation_manager.py:95] Precompile all the subgraphs with possible input shapes.
+(EngineCore pid=7473) INFO 05-15 02:13:55 [compilation_manager.py:85] Precompile worker0 backbone --> {'num_tokens': 16}
+(EngineCore pid=7473) WARNING 05-15 02:13:55 [tuned_block_sizes_hd64.py:456] Couldn`t find tuned sizes for the RPA v3 kernel with ('TPU v6e', 256, 'q_bfloat16_kv_bfloat16', 'q_head-32_kv_head-8_head-64', 'max_model_len-8192-sw-None')
+(EngineCore pid=7473) INFO 05-15 02:13:55 [tuned_block_sizes_hd64.py:477] RPA v3 kernel tuned block sizes for ('TPU v6e', 256, 'q_bfloat16_kv_bfloat16', 'q_head-32_kv_head-8_head-64', 'max_model_len-8192-sw-None'): bkv_p=8, bq=16
+W0515 02:13:56.847822    7473 pjrt_executable.cc:642] Assume version compatibility. PjRt-IFRT does not track XLA executable versions.
+(EngineCore pid=7473) INFO 05-15 02:13:56 [compilation_manager.py:90] Compilation finished in 1.73 [secs].
+(EngineCore pid=7473) INFO 05-15 02:13:56 [compilation_manager.py:85] Precompile worker0 backbone --> {'num_tokens': 32}
+(EngineCore pid=7473) INFO 05-15 02:13:56 [tuned_block_sizes_hd64.py:477] RPA v3 kernel tuned block sizes for ('TPU v6e', 256, 'q_bfloat16_kv_bfloat16', 'q_head-32_kv_head-8_head-64', 'max_model_len-8192-sw-None'): bkv_p=8, bq=32
+W0515 02:13:58.038278    7473 pjrt_executable.cc:642] Assume version compatibility. PjRt-IFRT does not track XLA executable versions.
+(EngineCore pid=7473) INFO 05-15 02:13:58 [compilation_manager.py:90] Compilation finished in 1.16 [secs].
+(EngineCore pid=7473) INFO 05-15 02:13:58 [compilation_manager.py:85] Precompile worker0 backbone --> {'num_tokens': 64}
+W0515 02:13:59.205677    7473 pjrt_executable.cc:642] Assume version compatibility. PjRt-IFRT does not track XLA executable versions.
+(EngineCore pid=7473) INFO 05-15 02:13:59 [compilation_manager.py:90] Compilation finished in 1.13 [secs].
+(EngineCore pid=7473) INFO 05-15 02:13:59 [compilation_manager.py:85] Precompile worker0 backbone --> {'num_tokens': 128}
+W0515 02:14:00.833937    7473 pjrt_executable.cc:642] Assume version compatibility. PjRt-IFRT does not track XLA executable versions.
+(EngineCore pid=7473) INFO 05-15 02:14:00 [compilation_manager.py:90] Compilation finished in 1.60 [secs].
+(EngineCore pid=7473) INFO 05-15 02:14:00 [compilation_manager.py:85] Precompile worker0 backbone --> {'num_tokens': 256}
+W0515 02:14:02.008229    7473 pjrt_executable.cc:642] Assume version compatibility. PjRt-IFRT does not track XLA executable versions.
+(EngineCore pid=7473) INFO 05-15 02:14:02 [compilation_manager.py:90] Compilation finished in 1.15 [secs].
+(EngineCore pid=7473) INFO 05-15 02:14:02 [compilation_manager.py:85] Precompile worker0 backbone --> {'num_tokens': 512}
+W0515 02:14:03.196021    7473 pjrt_executable.cc:642] Assume version compatibility. PjRt-IFRT does not track XLA executable versions.
+(EngineCore pid=7473) INFO 05-15 02:14:03 [compilation_manager.py:90] Compilation finished in 1.16 [secs].
+(EngineCore pid=7473) INFO 05-15 02:14:03 [compilation_manager.py:85] Precompile worker0 backbone --> {'num_tokens': 1024}
+W0515 02:14:04.908069    7473 pjrt_executable.cc:642] Assume version compatibility. PjRt-IFRT does not track XLA executable versions.
+(EngineCore pid=7473) INFO 05-15 02:14:04 [compilation_manager.py:90] Compilation finished in 1.68 [secs].
+(EngineCore pid=7473) INFO 05-15 02:14:05 [compilation_manager.py:85] Precompile worker0 backbone --> {'num_tokens': 2048}
+W0515 02:14:06.086510    7473 pjrt_executable.cc:642] Assume version compatibility. PjRt-IFRT does not track XLA executable versions.
+(EngineCore pid=7473) INFO 05-15 02:14:06 [compilation_manager.py:90] Compilation finished in 1.15 [secs].
+(EngineCore pid=7473) INFO 05-15 02:14:06 [compilation_manager.py:85] Precompile worker0 backbone --> {'num_tokens': 4096}
+W0515 02:14:07.261370    7473 pjrt_executable.cc:642] Assume version compatibility. PjRt-IFRT does not track XLA executable versions.
+(EngineCore pid=7473) INFO 05-15 02:14:07 [compilation_manager.py:90] Compilation finished in 1.16 [secs].
+(EngineCore pid=7473) INFO 05-15 02:14:07 [compilation_manager.py:85] Precompile worker0 backbone --> {'num_tokens': 8192}
+W0515 02:14:08.458927    7473 pjrt_executable.cc:642] Assume version compatibility. PjRt-IFRT does not track XLA executable versions.
+(EngineCore pid=7473) INFO 05-15 02:14:08 [compilation_manager.py:90] Compilation finished in 1.18 [secs].
+(EngineCore pid=7473) INFO 05-15 02:14:08 [compilation_manager.py:85] Precompile _substitute_placeholder_token_fn --> {'num_tokens': 16, 'num_reqs': 8}
+(EngineCore pid=7473) /usr/local/lib/python3.12/site-packages/jax/_src/interpreters/mlir.py:1272: UserWarning: Some donated buffers were not usable: int32[16], int32[16].
+(EngineCore pid=7473) See an explanation at https://docs.jax.dev/en/latest/faq.html#buffer-donation.
+(EngineCore pid=7473)   warnings.warn("Some donated buffers were not usable:"
+(EngineCore pid=7473) INFO 05-15 02:14:08 [compilation_manager.py:90] Compilation finished in 0.05 [secs].
+(EngineCore pid=7473) INFO 05-15 02:14:08 [compilation_manager.py:85] Precompile _substitute_placeholder_token_fn --> {'num_tokens': 32, 'num_reqs': 8}
+(EngineCore pid=7473) /usr/local/lib/python3.12/site-packages/jax/_src/interpreters/mlir.py:1272: UserWarning: Some donated buffers were not usable: int32[32], int32[32].
+(EngineCore pid=7473) See an explanation at https://docs.jax.dev/en/latest/faq.html#buffer-donation.
+(EngineCore pid=7473)   warnings.warn("Some donated buffers were not usable:"
+(EngineCore pid=7473) INFO 05-15 02:14:08 [compilation_manager.py:90] Compilation finished in 0.06 [secs].
+(EngineCore pid=7473) INFO 05-15 02:14:08 [compilation_manager.py:85] Precompile _substitute_placeholder_token_fn --> {'num_tokens': 64, 'num_reqs': 8}
+(EngineCore pid=7473) /usr/local/lib/python3.12/site-packages/jax/_src/interpreters/mlir.py:1272: UserWarning: Some donated buffers were not usable: int32[64], int32[64].
+(EngineCore pid=7473) See an explanation at https://docs.jax.dev/en/latest/faq.html#buffer-donation.
+(EngineCore pid=7473)   warnings.warn("Some donated buffers were not usable:"
+(EngineCore pid=7473) INFO 05-15 02:14:08 [compilation_manager.py:90] Compilation finished in 0.08 [secs].
+(EngineCore pid=7473) INFO 05-15 02:14:08 [compilation_manager.py:85] Precompile _substitute_placeholder_token_fn --> {'num_tokens': 128, 'num_reqs': 8}
+(EngineCore pid=7473) /usr/local/lib/python3.12/site-packages/jax/_src/interpreters/mlir.py:1272: UserWarning: Some donated buffers were not usable: int32[128], int32[128].
+(EngineCore pid=7473) See an explanation at https://docs.jax.dev/en/latest/faq.html#buffer-donation.
+(EngineCore pid=7473)   warnings.warn("Some donated buffers were not usable:"
+(EngineCore pid=7473) INFO 05-15 02:14:08 [compilation_manager.py:90] Compilation finished in 0.10 [secs].
+(EngineCore pid=7473) INFO 05-15 02:14:08 [compilation_manager.py:85] Precompile _substitute_placeholder_token_fn --> {'num_tokens': 256, 'num_reqs': 8}
+(EngineCore pid=7473) /usr/local/lib/python3.12/site-packages/jax/_src/interpreters/mlir.py:1272: UserWarning: Some donated buffers were not usable: int32[256], int32[256].
+(EngineCore pid=7473) See an explanation at https://docs.jax.dev/en/latest/faq.html#buffer-donation.
+(EngineCore pid=7473)   warnings.warn("Some donated buffers were not usable:"
+(EngineCore pid=7473) INFO 05-15 02:14:08 [compilation_manager.py:90] Compilation finished in 0.12 [secs].
+(EngineCore pid=7473) INFO 05-15 02:14:08 [compilation_manager.py:85] Precompile _substitute_placeholder_token_fn --> {'num_tokens': 512, 'num_reqs': 8}
+(EngineCore pid=7473) /usr/local/lib/python3.12/site-packages/jax/_src/interpreters/mlir.py:1272: UserWarning: Some donated buffers were not usable: int32[512], int32[512].
+(EngineCore pid=7473) See an explanation at https://docs.jax.dev/en/latest/faq.html#buffer-donation.
+(EngineCore pid=7473)   warnings.warn("Some donated buffers were not usable:"
+(EngineCore pid=7473) INFO 05-15 02:14:09 [compilation_manager.py:90] Compilation finished in 0.12 [secs].
+(EngineCore pid=7473) INFO 05-15 02:14:09 [compilation_manager.py:85] Precompile _substitute_placeholder_token_fn --> {'num_tokens': 1024, 'num_reqs': 8}
+(EngineCore pid=7473) /usr/local/lib/python3.12/site-packages/jax/_src/interpreters/mlir.py:1272: UserWarning: Some donated buffers were not usable: int32[1024], int32[1024].
+(EngineCore pid=7473) See an explanation at https://docs.jax.dev/en/latest/faq.html#buffer-donation.
+(EngineCore pid=7473)   warnings.warn("Some donated buffers were not usable:"
+(EngineCore pid=7473) INFO 05-15 02:14:09 [compilation_manager.py:90] Compilation finished in 0.12 [secs].
+(EngineCore pid=7473) INFO 05-15 02:14:09 [compilation_manager.py:85] Precompile _substitute_placeholder_token_fn --> {'num_tokens': 2048, 'num_reqs': 8}
+(EngineCore pid=7473) /usr/local/lib/python3.12/site-packages/jax/_src/interpreters/mlir.py:1272: UserWarning: Some donated buffers were not usable: int32[2048], int32[2048].
+(EngineCore pid=7473) See an explanation at https://docs.jax.dev/en/latest/faq.html#buffer-donation.
+(EngineCore pid=7473)   warnings.warn("Some donated buffers were not usable:"
+(EngineCore pid=7473) INFO 05-15 02:14:09 [compilation_manager.py:90] Compilation finished in 0.12 [secs].
+(EngineCore pid=7473) INFO 05-15 02:14:09 [compilation_manager.py:85] Precompile _substitute_placeholder_token_fn --> {'num_tokens': 4096, 'num_reqs': 8}
+(EngineCore pid=7473) /usr/local/lib/python3.12/site-packages/jax/_src/interpreters/mlir.py:1272: UserWarning: Some donated buffers were not usable: int32[4096], int32[4096].
+(EngineCore pid=7473) See an explanation at https://docs.jax.dev/en/latest/faq.html#buffer-donation.
+(EngineCore pid=7473)   warnings.warn("Some donated buffers were not usable:"
+(EngineCore pid=7473) INFO 05-15 02:14:09 [compilation_manager.py:90] Compilation finished in 0.12 [secs].
+(EngineCore pid=7473) INFO 05-15 02:14:09 [compilation_manager.py:85] Precompile _substitute_placeholder_token_fn --> {'num_tokens': 8192, 'num_reqs': 8}
+(EngineCore pid=7473) /usr/local/lib/python3.12/site-packages/jax/_src/interpreters/mlir.py:1272: UserWarning: Some donated buffers were not usable: int32[8192], int32[8192].
+(EngineCore pid=7473) See an explanation at https://docs.jax.dev/en/latest/faq.html#buffer-donation.
+(EngineCore pid=7473)   warnings.warn("Some donated buffers were not usable:"
+(EngineCore pid=7473) INFO 05-15 02:14:09 [compilation_manager.py:90] Compilation finished in 0.12 [secs].
+(EngineCore pid=7473) INFO 05-15 02:14:09 [compilation_manager.py:466] Compiling select_from_array with different input shapes.
+(EngineCore pid=7473) INFO 05-15 02:14:09 [compilation_manager.py:445] Compiling select_from_array for worker0 select all logits.
+(EngineCore pid=7473) INFO 05-15 02:14:09 [compilation_manager.py:85] Precompile select_from_array [worker0 select all logits] --> {'array_size': 16, 'index_size': 8}
+(EngineCore pid=7473) INFO 05-15 02:14:09 [compilation_manager.py:90] Compilation finished in 0.04 [secs].
+(EngineCore pid=7473) INFO 05-15 02:14:09 [compilation_manager.py:85] Precompile select_from_array [worker0 select all logits] --> {'array_size': 32, 'index_size': 8}
+(EngineCore pid=7473) INFO 05-15 02:14:09 [compilation_manager.py:90] Compilation finished in 0.04 [secs].
+(EngineCore pid=7473) INFO 05-15 02:14:09 [compilation_manager.py:85] Precompile select_from_array [worker0 select all logits] --> {'array_size': 64, 'index_size': 8}
+(EngineCore pid=7473) INFO 05-15 02:14:09 [compilation_manager.py:90] Compilation finished in 0.05 [secs].
+(EngineCore pid=7473) INFO 05-15 02:14:09 [compilation_manager.py:85] Precompile select_from_array [worker0 select all logits] --> {'array_size': 128, 'index_size': 8}
+(EngineCore pid=7473) INFO 05-15 02:14:09 [compilation_manager.py:90] Compilation finished in 0.06 [secs].
+(EngineCore pid=7473) INFO 05-15 02:14:09 [compilation_manager.py:85] Precompile select_from_array [worker0 select all logits] --> {'array_size': 256, 'index_size': 8}
+(EngineCore pid=7473) INFO 05-15 02:14:10 [compilation_manager.py:90] Compilation finished in 0.08 [secs].
+(EngineCore pid=7473) INFO 05-15 02:14:10 [compilation_manager.py:85] Precompile select_from_array [worker0 select all logits] --> {'array_size': 512, 'index_size': 8}
+(EngineCore pid=7473) INFO 05-15 02:14:10 [compilation_manager.py:90] Compilation finished in 0.12 [secs].
+(EngineCore pid=7473) INFO 05-15 02:14:10 [compilation_manager.py:85] Precompile select_from_array [worker0 select all logits] --> {'array_size': 1024, 'index_size': 8}
+(EngineCore pid=7473) INFO 05-15 02:14:10 [compilation_manager.py:90] Compilation finished in 0.22 [secs].
+(EngineCore pid=7473) INFO 05-15 02:14:10 [compilation_manager.py:85] Precompile select_from_array [worker0 select all logits] --> {'array_size': 2048, 'index_size': 8}
+(EngineCore pid=7473) INFO 05-15 02:14:10 [compilation_manager.py:90] Compilation finished in 0.41 [secs].
+(EngineCore pid=7473) INFO 05-15 02:14:10 [compilation_manager.py:85] Precompile select_from_array [worker0 select all logits] --> {'array_size': 4096, 'index_size': 8}
+(EngineCore pid=7473) INFO 05-15 02:14:10 [compilation_manager.py:90] Compilation finished in 0.04 [secs].
+(EngineCore pid=7473) INFO 05-15 02:14:11 [compilation_manager.py:85] Precompile select_from_array [worker0 select all logits] --> {'array_size': 8192, 'index_size': 8}
+(EngineCore pid=7473) INFO 05-15 02:14:11 [compilation_manager.py:90] Compilation finished in 0.04 [secs].
+(EngineCore pid=7473) INFO 05-15 02:14:11 [compilation_manager.py:513] Compiling compute_logits with different input shapes.
+(EngineCore pid=7473) INFO 05-15 02:14:11 [compilation_manager.py:85] Precompile worker0 compute_logits --> {'num_reqs': 8}
+(EngineCore pid=7473) INFO 05-15 02:14:11 [compilation_manager.py:90] Compilation finished in 0.28 [secs].
+(EngineCore pid=7473) INFO 05-15 02:14:11 [compilation_manager.py:974] Compiling structured_decoding with different input shapes.
+(EngineCore pid=7473) INFO 05-15 02:14:11 [compilation_manager.py:85] Precompile structured_decode --> {'num_reqs': 8}
+(EngineCore pid=7473) INFO 05-15 02:14:12 [compilation_manager.py:90] Compilation finished in 0.75 [secs].
+(EngineCore pid=7473) INFO 05-15 02:14:12 [core.py:299] init engine (profile, create kv cache, warmup model) took 20.37 s (compilation: 17.03 s)
+(EngineCore pid=7473) WARNING 05-15 02:14:12 [vllm.py:903] Inductor compilation was disabled by user settings, optimizations settings that are only active during inductor compilation will be ignored.
+(EngineCore pid=7473) INFO 05-15 02:14:12 [kernel.py:199] Final IR op priority after setting platform defaults: IrOpPriorityConfig(rms_norm=['native'])
+(EngineCore pid=7473) INFO 05-15 02:14:12 [tpu_platform.py:190] Initialized sharding configuration: ShardingConfigManager(total_devices=1, sharding_strategy=ShardingStrategy(tensor_parallelism=1, expert_parallelism=1, sequence_parallelism=1, data_parallelism=1, attention_data_parallelism=1, attention_data_expert_parallelism=1), device_indexes=None)
+(EngineCore pid=7473) INFO 05-15 02:14:12 [tpu_platform.py:245] Using KV cache block size: 256
+(EngineCore pid=7473) INFO 05-15 02:14:12 [tpu_platform.py:256] Force using UniProcExecutor for JAX on single host without pipeline parallelism.
+WARNING 05-15 02:14:12 [tpu_platform.py:317] Pin memory is not supported on TPU.
+
+[2026-05-15 02:14:14.777236] warming up buckets ...
+Rendering prompts:   0%|          | 0/2 [00:00<?, ?it/s]Rendering prompts: 100%|██████████| 2/2 [00:00<00:00, 2566.89it/s]
+Processed prompts:   0%|          | 0/2 [00:00<?, ?it/s, est. speed input: 0.00 toks/s, output: 0.00 toks/s]Processed prompts:  50%|█████     | 1/2 [00:00<00:00,  5.46it/s, est. speed input: 349.46 toks/s, output: 27.30 toks/s]Processed prompts: 100%|██████████| 2/2 [00:00<00:00,  5.46it/s, est. speed input: 695.26 toks/s, output: 54.31 toks/s]Processed prompts: 100%|██████████| 2/2 [00:00<00:00, 10.86it/s, est. speed input: 695.26 toks/s, output: 54.31 toks/s]
+  warmup (il=64, ol=5): 0.19s
+Rendering prompts:   0%|          | 0/2 [00:00<?, ?it/s]Rendering prompts: 100%|██████████| 2/2 [00:00<00:00, 4665.52it/s]
+Processed prompts:   0%|          | 0/2 [00:00<?, ?it/s, est. speed input: 0.00 toks/s, output: 0.00 toks/s]Processed prompts: 100%|██████████| 2/2 [00:00<00:00, 32.60it/s, est. speed input: 4239.67 toks/s, output: 326.08 toks/s]Processed prompts: 100%|██████████| 2/2 [00:00<00:00, 32.54it/s, est. speed input: 4239.67 toks/s, output: 326.08 toks/s]
+  warmup (il=130, ol=10): 0.06s
+Rendering prompts:   0%|          | 0/2 [00:00<?, ?it/s]Rendering prompts: 100%|██████████| 2/2 [00:00<00:00, 4665.52it/s]
+Processed prompts:   0%|          | 0/2 [00:00<?, ?it/s, est. speed input: 0.00 toks/s, output: 0.00 toks/s]Processed prompts: 100%|██████████| 2/2 [00:00<00:00, 22.15it/s, est. speed input: 5761.86 toks/s, output: 443.17 toks/s]Processed prompts: 100%|██████████| 2/2 [00:00<00:00, 22.12it/s, est. speed input: 5761.86 toks/s, output: 443.17 toks/s]
+  warmup (il=260, ol=20): 0.09s
+Rendering prompts:   0%|          | 0/2 [00:00<?, ?it/s]Rendering prompts: 100%|██████████| 2/2 [00:00<00:00, 4403.47it/s]
+Processed prompts:   0%|          | 0/2 [00:00<?, ?it/s, est. speed input: 0.00 toks/s, output: 0.00 toks/s]Processed prompts:  50%|█████     | 1/2 [00:00<00:00,  6.66it/s, est. speed input: 3465.82 toks/s, output: 266.57 toks/s]Processed prompts: 100%|██████████| 2/2 [00:00<00:00,  6.66it/s, est. speed input: 6884.13 toks/s, output: 529.51 toks/s]Processed prompts: 100%|██████████| 2/2 [00:00<00:00, 13.23it/s, est. speed input: 6884.13 toks/s, output: 529.51 toks/s]
+  warmup (il=520, ol=40): 0.15s
+Rendering prompts:   0%|          | 0/2 [00:00<?, ?it/s]Rendering prompts: 100%|██████████| 2/2 [00:00<00:00, 3729.93it/s]
+Processed prompts:   0%|          | 0/2 [00:00<?, ?it/s, est. speed input: 0.00 toks/s, output: 0.00 toks/s]Processed prompts:  50%|█████     | 1/2 [00:00<00:00,  3.61it/s, est. speed input: 3720.71 toks/s, output: 288.97 toks/s]Processed prompts: 100%|██████████| 2/2 [00:00<00:00,  3.61it/s, est. speed input: 7413.52 toks/s, output: 575.78 toks/s]Processed prompts: 100%|██████████| 2/2 [00:00<00:00,  7.19it/s, est. speed input: 7413.52 toks/s, output: 575.78 toks/s]
+  warmup (il=1030, ol=80): 0.28s
+Rendering prompts:   0%|          | 0/2 [00:00<?, ?it/s]Rendering prompts: 100%|██████████| 2/2 [00:00<00:00, 3240.10it/s]
+Processed prompts:   0%|          | 0/2 [00:00<?, ?it/s, est. speed input: 0.00 toks/s, output: 0.00 toks/s]Processed prompts:  50%|█████     | 1/2 [00:00<00:00,  1.84it/s, est. speed input: 3764.01 toks/s, output: 293.77 toks/s]Processed prompts: 100%|██████████| 2/2 [00:00<00:00,  1.84it/s, est. speed input: 7512.75 toks/s, output: 586.35 toks/s]Processed prompts: 100%|██████████| 2/2 [00:00<00:00,  3.66it/s, est. speed input: 7512.75 toks/s, output: 586.35 toks/s]
+  warmup (il=2050, ol=160): 0.55s
+Rendering prompts:   0%|          | 0/2 [00:00<?, ?it/s]Rendering prompts: 100%|██████████| 2/2 [00:00<00:00, 2532.79it/s]
+Processed prompts:   0%|          | 0/2 [00:00<?, ?it/s, est. speed input: 0.00 toks/s, output: 0.00 toks/s]Processed prompts:  50%|█████     | 1/2 [00:01<00:01,  1.03s/it, est. speed input: 3971.78 toks/s, output: 290.61 toks/s]Processed prompts: 100%|██████████| 2/2 [00:01<00:00,  1.03s/it, est. speed input: 7935.26 toks/s, output: 580.62 toks/s]Processed prompts: 100%|██████████| 2/2 [00:01<00:00,  1.94it/s, est. speed input: 7935.26 toks/s, output: 580.62 toks/s]
+  warmup (il=4100, ol=300): 1.03s
+
+[2026-05-15 02:14:17.154562] single-shot continuous-batched sweep: 100 requests, max_num_seqs=2
+Rendering prompts:   0%|          | 0/100 [00:00<?, ?it/s]Rendering prompts: 100%|██████████| 100/100 [00:00<00:00, 6464.71it/s]
+Processed prompts:   0%|          | 0/100 [00:00<?, ?it/s, est. speed input: 0.00 toks/s, output: 0.00 toks/s]Processed prompts:   1%|          | 1/100 [00:00<00:12,  7.75it/s, est. speed input: 13575.00 toks/s, output: 341.07 toks/s]Processed prompts:   2%|▏         | 2/100 [00:00<00:10,  8.92it/s, est. speed input: 10837.32 toks/s, output: 519.13 toks/s]Processed prompts:   4%|▍         | 4/100 [00:00<00:09, 10.38it/s, est. speed input: 10591.72 toks/s, output: 580.26 toks/s]Processed prompts:   6%|▌         | 6/100 [00:00<00:10,  9.28it/s, est. speed input: 8849.20 toks/s, output: 562.08 toks/s] Processed prompts:   8%|▊         | 8/100 [00:00<00:08, 10.45it/s, est. speed input: 10080.86 toks/s, output: 587.76 toks/s]Processed prompts:  10%|█         | 10/100 [00:01<00:10,  8.73it/s, est. speed input: 9580.16 toks/s, output: 597.66 toks/s]Processed prompts:  12%|█▏        | 12/100 [00:01<00:09,  9.63it/s, est. speed input: 9875.77 toks/s, output: 621.09 toks/s]Processed prompts:  14%|█▍        | 14/100 [00:01<00:09,  9.16it/s, est. speed input: 9919.45 toks/s, output: 589.01 toks/s]Processed prompts:  16%|█▌        | 16/100 [00:01<00:09,  8.70it/s, est. speed input: 9613.42 toks/s, output: 608.38 toks/s]Processed prompts:  18%|█▊        | 18/100 [00:01<00:08,  9.27it/s, est. speed input: 9149.31 toks/s, output: 620.50 toks/s]Processed prompts:  20%|██        | 20/100 [00:02<00:08,  9.23it/s, est. speed input: 8533.70 toks/s, output: 624.43 toks/s]Processed prompts:  21%|██        | 21/100 [00:02<00:09,  8.61it/s, est. speed input: 8335.86 toks/s, output: 624.53 toks/s](EngineCore pid=7473) WARNING 05-15 02:14:19 [tpu_runner.py:808] Should not schedule a request that does nothing!
+Processed prompts:  22%|██▏       | 22/100 [00:02<00:10,  7.80it/s, est. speed input: 8162.66 toks/s, output: 624.05 toks/s]Processed prompts:  24%|██▍       | 24/100 [00:02<00:08,  9.38it/s, est. speed input: 8199.05 toks/s, output: 629.78 toks/s]Processed prompts:  25%|██▌       | 25/100 [00:02<00:08,  8.51it/s, est. speed input: 8032.11 toks/s, output: 628.32 toks/s]Processed prompts:  27%|██▋       | 27/100 [00:02<00:07,  9.37it/s, est. speed input: 8038.37 toks/s, output: 627.19 toks/s]Processed prompts:  30%|███       | 30/100 [00:03<00:05, 12.14it/s, est. speed input: 8446.48 toks/s, output: 632.72 toks/s]Processed prompts:  32%|███▏      | 32/100 [00:03<00:05, 11.62it/s, est. speed input: 8609.39 toks/s, output: 634.20 toks/s]Processed prompts:  34%|███▍      | 34/100 [00:03<00:05, 12.12it/s, est. speed input: 8534.91 toks/s, output: 631.03 toks/s]Processed prompts:  36%|███▌      | 36/100 [00:03<00:05, 11.76it/s, est. speed input: 8693.32 toks/s, output: 628.57 toks/s]Processed prompts:  38%|███▊      | 38/100 [00:03<00:05, 11.49it/s, est. speed input: 9030.27 toks/s, output: 629.85 toks/s]Processed prompts:  40%|████      | 40/100 [00:03<00:05, 11.96it/s, est. speed input: 9087.95 toks/s, output: 635.34 toks/s]Processed prompts:  42%|████▏     | 42/100 [00:04<00:05, 11.40it/s, est. speed input: 9250.04 toks/s, output: 633.25 toks/s]Processed prompts:  44%|████▍     | 44/100 [00:04<00:05, 11.08it/s, est. speed input: 9462.96 toks/s, output: 636.25 toks/s]Processed prompts:  46%|████▌     | 46/100 [00:04<00:04, 11.20it/s, est. speed input: 9418.50 toks/s, output: 629.47 toks/s]Processed prompts:  48%|████▊     | 48/100 [00:04<00:04, 12.12it/s, est. speed input: 9527.62 toks/s, output: 634.20 toks/s]Processed prompts:  50%|█████     | 50/100 [00:04<00:04, 11.44it/s, est. speed input: 9390.15 toks/s, output: 633.71 toks/s]Processed prompts:  52%|█████▏    | 52/100 [00:05<00:04, 11.75it/s, est. speed input: 9437.02 toks/s, output: 633.29 toks/s]Processed prompts:  54%|█████▍    | 54/100 [00:05<00:04, 10.11it/s, est. speed input: 9127.39 toks/s, output: 640.67 toks/s]Processed prompts:  56%|█████▌    | 56/100 [00:05<00:04,  8.96it/s, est. speed input: 8886.28 toks/s, output: 627.78 toks/s]Processed prompts:  58%|█████▊    | 58/100 [00:05<00:04, 10.05it/s, est. speed input: 8923.49 toks/s, output: 636.43 toks/s]Processed prompts:  60%|██████    | 60/100 [00:05<00:03, 10.21it/s, est. speed input: 8875.68 toks/s, output: 637.40 toks/s]Processed prompts:  62%|██████▏   | 62/100 [00:06<00:03, 11.52it/s, est. speed input: 8860.80 toks/s, output: 638.33 toks/s]Processed prompts:  65%|██████▌   | 65/100 [00:06<00:02, 14.72it/s, est. speed input: 8974.13 toks/s, output: 643.24 toks/s]Processed prompts:  67%|██████▋   | 67/100 [00:06<00:02, 12.77it/s, est. speed input: 8841.50 toks/s, output: 637.63 toks/s]Processed prompts:  69%|██████▉   | 69/100 [00:06<00:02, 11.40it/s, est. speed input: 8819.32 toks/s, output: 643.15 toks/s]Processed prompts:  71%|███████   | 71/100 [00:06<00:03,  8.67it/s, est. speed input: 8779.68 toks/s, output: 636.16 toks/s]Processed prompts:  73%|███████▎  | 73/100 [00:07<00:03,  8.71it/s, est. speed input: 8739.38 toks/s, output: 638.23 toks/s]Processed prompts:  75%|███████▌  | 75/100 [00:07<00:02,  8.69it/s, est. speed input: 8688.92 toks/s, output: 643.22 toks/s]Processed prompts:  77%|███████▋  | 77/100 [00:07<00:02,  9.74it/s, est. speed input: 8684.51 toks/s, output: 642.86 toks/s]Processed prompts:  79%|███████▉  | 79/100 [00:07<00:02,  9.64it/s, est. speed input: 8729.76 toks/s, output: 642.28 toks/s]Processed prompts:  81%|████████  | 81/100 [00:08<00:02,  8.30it/s, est. speed input: 8704.66 toks/s, output: 636.60 toks/s]Processed prompts:  82%|████████▏ | 82/100 [00:08<00:02,  8.28it/s, est. speed input: 8732.93 toks/s, output: 642.39 toks/s]Processed prompts:  83%|████████▎ | 83/100 [00:08<00:02,  8.20it/s, est. speed input: 8686.47 toks/s, output: 642.32 toks/s]Processed prompts:  84%|████████▍ | 84/100 [00:08<00:02,  7.90it/s, est. speed input: 8668.42 toks/s, output: 640.94 toks/s]Processed prompts:  86%|████████▌ | 86/100 [00:08<00:01,  8.07it/s, est. speed input: 8750.17 toks/s, output: 638.48 toks/s]Processed prompts:  88%|████████▊ | 88/100 [00:08<00:01,  8.78it/s, est. speed input: 8742.60 toks/s, output: 642.03 toks/s]Processed prompts:  89%|████████▉ | 89/100 [00:09<00:01,  7.90it/s, est. speed input: 8653.55 toks/s, output: 635.92 toks/s]Processed prompts:  92%|█████████▏| 92/100 [00:09<00:00,  9.64it/s, est. speed input: 8625.55 toks/s, output: 639.37 toks/s]Processed prompts:  94%|█████████▍| 94/100 [00:09<00:00, 10.82it/s, est. speed input: 8619.72 toks/s, output: 642.92 toks/s]Processed prompts:  96%|█████████▌| 96/100 [00:09<00:00, 10.29it/s, est. speed input: 8566.26 toks/s, output: 645.12 toks/s]Processed prompts:  98%|█████████▊| 98/100 [00:09<00:00, 10.24it/s, est. speed input: 8566.45 toks/s, output: 645.18 toks/s](EngineCore pid=7473) WARNING 05-15 02:14:27 [tpu_runner.py:808] Should not schedule a request that does nothing!
+Processed prompts: 100%|██████████| 100/100 [00:10<00:00, 10.36it/s, est. speed input: 8593.57 toks/s, output: 645.05 toks/s]Processed prompts: 100%|██████████| 100/100 [00:10<00:00, 10.36it/s, est. speed input: 8593.57 toks/s, output: 645.05 toks/s]Processed prompts: 100%|██████████| 100/100 [00:10<00:00,  9.95it/s, est. speed input: 8593.57 toks/s, output: 645.05 toks/s]
+(EngineCore pid=7473) INFO 05-15 02:14:27 [core.py:1234] Shutdown initiated (timeout=0)
+(EngineCore pid=7473) INFO 05-15 02:14:27 [core.py:1257] Shutdown complete
+  [sweep]  n_reqs=100  max_il=2230  max_ol=142  OK                   e2e=    10062ms
+
+[DONE]
+  /app/LLMServingSim/studies/tpu_baseline/results/lens_vllm_continuous/Llama-3.2-1B-Instruct/tp1/bs2/cnn_20260515_021427.csv
+  /app/LLMServingSim/studies/tpu_baseline/results/lens_vllm_continuous/Llama-3.2-1B-Instruct/tp1/bs2/cnn_20260515_021427.json
+  latest -> cnn.csv

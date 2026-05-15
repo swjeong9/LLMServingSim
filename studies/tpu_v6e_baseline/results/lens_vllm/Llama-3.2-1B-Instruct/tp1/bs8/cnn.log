@@ -1,0 +1,427 @@
+[output] /app/LLMServingSim/studies/tpu_baseline/results/lens_vllm/Llama-3.2-1B-Instruct/tp1/bs8
+[2026-05-11 09:10:27.979427] loaded 50 runs (batch=8) from /app/LLMServingSim/studies/tpu_baseline/data/datasets/cnn.csv
+INFO 05-11 09:10:30 [__init__.py:59] TPU info: node_name=swj-v6e-for-llmservingsim2 | tpu_type=v6e-1 | worker_id=0 | num_chips=1 | num_cores_per_chip=1
+WARNING:absl:Tensorflow library not found, tensorflow.io.gfile operations will use native shim calls. GCS paths (i.e. 'gs://...') cannot be accessed.
+INFO 05-11 09:10:35 [tpu_platform.py:152] Automatically using fp8_e5m2 for FP8 KV cache on TPU v6e.
+[init_llm] model=meta-llama/Llama-3.2-1B-Instruct
+  tp=1 batch=8 max_model_len=8192
+  dtype=bfloat16  prefix_caching=False  chunked_prefill=False
+INFO 05-11 09:10:36 [attention_interface.py:53] Using default RPA kernel
+INFO 05-11 09:10:36 [importing.py:44] Triton is installed but 0 active driver(s) found (expected 1). Disabling Triton to prevent runtime errors.
+INFO 05-11 09:10:36 [importing.py:68] Triton not installed or not compatible; certain GPU-related functions will not be available.
+WARNING 05-11 09:10:36 [interface.py:240] Failed to import from vllm._C: ModuleNotFoundError("No module named 'vllm._C'")
+INFO 05-11 09:10:36 [tpu_platform.py:152] Automatically using fp8_e5m2 for FP8 KV cache on TPU v6e.
+INFO 05-11 09:10:36 [tpu_platform.py:152] Automatically using fp8_e5m2 for FP8 KV cache on TPU v6e.
+INFO 05-11 09:10:36 [tpu_platform.py:152] Automatically using fp8_e5m2 for FP8 KV cache on TPU v6e.
+INFO 05-11 09:10:36 [tpu_platform.py:152] Automatically using fp8_e5m2 for FP8 KV cache on TPU v6e.
+INFO 05-11 09:10:36 [__init__.py:110] Registered model loader `<class 'tpu_inference.models.jax.utils.weight_utils.JaxDummyModelLoader'>` with load format `jax_dummy`
+INFO 05-11 09:10:36 [__init__.py:110] Registered model loader `<class 'tpu_inference.models.common.pathways_dummy_loader.PathwaysDummyModelLoader'>` with load format `pathways_dummy`
+WARNING 05-11 09:10:36 [__init__.py:85] The quantization method 'awq' already exists and will be overwritten by the quantization config <class 'tpu_inference.layers.vllm.quantization.awq.VllmAWQConfig'>.
+WARNING 05-11 09:10:37 [__init__.py:85] The quantization method 'compressed-tensors' already exists and will be overwritten by the quantization config <class 'tpu_inference.layers.vllm.quantization.compressed_tensors.compressed_tensors.VllmCompressedTensorsConfig'>.
+WARNING 05-11 09:10:37 [__init__.py:85] The quantization method 'fp8' already exists and will be overwritten by the quantization config <class 'tpu_inference.layers.vllm.quantization.fp8.VllmFp8Config'>.
+WARNING 05-11 09:10:37 [__init__.py:85] The quantization method 'gpt_oss_mxfp4' already exists and will be overwritten by the quantization config <class 'tpu_inference.layers.vllm.quantization.mxfp4.VllmMxfp4Config'>.
+INFO 05-11 09:10:37 [__init__.py:110] Registered model loader `<class 'tpu_inference.models.vllm.vllm_model_loader.IncrementalModelLoader'>` with load format `tpu_streaming_loader`
+WARNING 05-11 09:10:37 [__init__.py:99] Load format `runai_streamer` is already registered, and will be overwritten by the new loader class `<class 'tpu_inference.models.vllm.vllm_model_loader.RunaiIncrementalModelLoader'>`.
+INFO 05-11 09:10:37 [__init__.py:110] Registered model loader `<class 'tpu_inference.models.vllm.vllm_model_loader.RunaiIncrementalModelLoader'>` with load format `runai_streamer`
+WARNING 05-11 09:10:37 [interface.py:240] Failed to import from vllm._C: ModuleNotFoundError("No module named 'vllm._C'")
+WARNING 05-11 09:10:37 [interface.py:240] Failed to import from vllm._C: ModuleNotFoundError("No module named 'vllm._C'")
+WARNING 05-11 09:10:37 [interface.py:240] Failed to import from vllm._C: ModuleNotFoundError("No module named 'vllm._C'")
+WARNING:root:Duplicate op registration for aten.__and__
+INFO 05-11 09:10:37 [utils.py:233] non-default args: {'dtype': 'bfloat16', 'max_model_len': 8192, 'enable_prefix_caching': False, 'max_num_seqs': 8, 'disable_log_stats': True, 'enable_chunked_prefill': False, 'model': 'meta-llama/Llama-3.2-1B-Instruct'}
+INFO 05-11 09:10:39 [model.py:554] Resolved architecture: LlamaForCausalLM
+INFO 05-11 09:10:39 [model.py:1685] Using max model len 8192
+WARNING 05-11 09:10:39 [arg_utils.py:2253] This model does not officially support disabling chunked prefill. Disabling this manually may cause the engine to crash or produce incorrect outputs.
+INFO 05-11 09:10:39 [vllm.py:834] Asynchronous scheduling is enabled.
+INFO 05-11 09:10:39 [kernel.py:199] Final IR op priority after setting platform defaults: IrOpPriorityConfig(rms_norm=['native'])
+INFO 05-11 09:10:39 [tpu_platform.py:190] Initialized sharding configuration: ShardingConfigManager(total_devices=1, sharding_strategy=ShardingStrategy(tensor_parallelism=1, expert_parallelism=1, sequence_parallelism=1, data_parallelism=1, attention_data_parallelism=1, attention_data_expert_parallelism=1), device_indexes=None)
+INFO 05-11 09:10:39 [tpu_platform.py:245] Using KV cache block size: 256
+INFO 05-11 09:10:39 [tpu_platform.py:256] Force using UniProcExecutor for JAX on single host without pipeline parallelism.
+INFO 05-11 09:10:39 [compilation.py:294] Enabled custom fusions: norm_quant, act_quant
+(EngineCore pid=17822) INFO 05-11 09:10:41 [core.py:107] Initializing a V1 LLM engine (v0.19.1rc1.dev379+g251c18d1f) with config: model='meta-llama/Llama-3.2-1B-Instruct', speculative_config=None, tokenizer='meta-llama/Llama-3.2-1B-Instruct', skip_tokenizer_init=False, tokenizer_mode=auto, revision=None, tokenizer_revision=None, trust_remote_code=False, dtype=torch.bfloat16, max_seq_len=8192, download_dir=None, load_format=auto, tensor_parallel_size=1, pipeline_parallel_size=1, data_parallel_size=1, decode_context_parallel_size=1, dcp_comm_backend=ag_rs, disable_custom_all_reduce=True, quantization=None, quantization_config=None, enforce_eager=False, enable_return_routed_experts=False, kv_cache_dtype=auto, device_config=None, structured_outputs_config=StructuredOutputsConfig(backend='auto', disable_any_whitespace=False, disable_additional_properties=False, reasoning_parser='', reasoning_parser_plugin='', enable_in_reasoning=False), observability_config=ObservabilityConfig(show_hidden_metrics_for_version=None, otlp_traces_endpoint=None, collect_detailed_traces=None, kv_cache_metrics=False, kv_cache_metrics_sample=0.01, cudagraph_metrics=False, enable_layerwise_nvtx_tracing=False, enable_mfu_metrics=False, enable_mm_processor_stats=False, enable_logging_iteration_details=False), seed=0, served_model_name=meta-llama/Llama-3.2-1B-Instruct, enable_prefix_caching=False, enable_chunked_prefill=False, pooler_config=None, compilation_config={'mode': <CompilationMode.DYNAMO_TRACE_ONCE: 2>, 'debug_dump_path': None, 'cache_dir': '', 'compile_cache_save_format': 'binary', 'backend': 'openxla', 'custom_ops': ['all'], 'ir_enable_torch_wrap': False, 'splitting_ops': [], 'compile_mm_encoder': False, 'cudagraph_mm_encoder': False, 'encoder_cudagraph_token_budgets': [], 'encoder_cudagraph_max_vision_items_per_batch': 0, 'encoder_cudagraph_max_frames_per_batch': 0, 'compile_sizes': None, 'compile_ranges_endpoints': [8192], 'inductor_compile_config': {'enable_auto_functionalized_v2': False, 'size_asserts': False, 'alignment_asserts': False, 'scalar_asserts': False, 'combo_kernels': True, 'benchmark_combo_kernel': True}, 'inductor_passes': {}, 'cudagraph_mode': <CUDAGraphMode.NONE: 0>, 'cudagraph_num_of_warmups': 0, 'cudagraph_capture_sizes': None, 'cudagraph_copy_inputs': False, 'cudagraph_specialize_lora': True, 'use_inductor_graph_partition': False, 'pass_config': {'fuse_norm_quant': True, 'fuse_act_quant': True, 'fuse_attn_quant': False, 'enable_sp': False, 'fuse_gemm_comms': False, 'fuse_allreduce_rms': False}, 'max_cudagraph_capture_size': None, 'dynamic_shapes_config': {'type': <DynamicShapesType.BACKED: 'backed'>, 'evaluate_guards': False, 'assume_32_bit_indexing': False}, 'local_cache_dir': None, 'fast_moe_cold_start': True, 'static_all_moe_layers': []}, kernel_config=KernelConfig(ir_op_priority=IrOpPriorityConfig(rms_norm=['native']), enable_flashinfer_autotune=True, moe_backend='auto')
+(EngineCore pid=17822) WARNING 05-11 09:10:41 [tpu_platform.py:317] Pin memory is not supported on TPU.
+(EngineCore pid=17822) INFO 05-11 09:10:43 [parallel_state.py:1400] world_size=1 rank=0 local_rank=0 distributed_init_method=file:///tmp/tmp0jbjhe0k backend=gloo
+[Gloo] Rank 0 is connected to 0 peer ranks. Expected number of connected peer ranks is : 0
+[Gloo] Rank 0 is connected to 0 peer ranks. Expected number of connected peer ranks is : 0
+[Gloo] Rank 0 is connected to 0 peer ranks. Expected number of connected peer ranks is : 0
+[Gloo] Rank 0 is connected to 0 peer ranks. Expected number of connected peer ranks is : 0
+[Gloo] Rank 0 is connected to 0 peer ranks. Expected number of connected peer ranks is : 0
+[Gloo] Rank 0 is connected to 0 peer ranks. Expected number of connected peer ranks is : 0
+[Gloo] Rank 0 is connected to 0 peer ranks. Expected number of connected peer ranks is : 0
+(EngineCore pid=17822) INFO 05-11 09:10:43 [parallel_state.py:1713] rank 0 in world size 1 is assigned as DP rank 0, PP rank 0, PCP rank 0, TP rank 0, EP rank N/A, EPLB rank N/A
+(EngineCore pid=17822) INFO 05-11 09:10:44 [tpu_runner.py:322] Init mesh | mesh=Mesh('data': 1, 'model': 1, axis_types=(Auto, Auto))
+(EngineCore pid=17822) INFO 05-11 09:10:44 [utils.py:95] Prepared token paddings: [16, 32, 64, 128, 256, 512, 1024, 2048, 4096, 8192]
+(EngineCore pid=17822) INFO 05-11 09:10:44 [utils.py:61] Prepared request paddings: [8]
+(EngineCore pid=17822) INFO 05-11 09:10:44 [compilation_manager.py:52] Enabling JAX compile cache.
+(EngineCore pid=17822) INFO 05-11 09:10:44 [tpu_worker.py:306] Init worker | rank=0 | is_first_rank=True | is_last_rank=True | topology_order_id=0 | is_driver_worker=True | hbm=[(0.0, 31.25)]GiB |self.devices=[TpuDevice(id=0, process_index=0, coords=(0,0,0), core_on_chip=0)] | total devices=[TpuDevice(id=0, process_index=0, coords=(0,0,0), core_on_chip=0)] | local_devices=[TpuDevice(id=0, process_index=0, coords=(0,0,0), core_on_chip=0)]
+(EngineCore pid=17822) INFO 05-11 09:10:44 [model_loader.py:473] Loading model with MODEL_IMPL_TYPE=auto
+(EngineCore pid=17822) INFO 05-11 09:10:44 [model_loader.py:476] Resolved MODEL_IMPL_TYPE 'auto' to 'flax_nnx'
+(EngineCore pid=17822) INFO 05-11 09:10:45 [weight_utils.py:151] Downloading weights from HF meta-llama/Llama-3.2-1B-Instruct
+(EngineCore pid=17822) INFO 05-11 09:10:45 [weight_utils.py:173] Loading weights from /root/.cache/huggingface/hub/models--meta-llama--Llama-3.2-1B-Instruct/snapshots/9213176726f574b556790deb65791e0c5aa438b6/model.safetensors
+(EngineCore pid=17822) INFO 05-11 09:10:47 [tpu_runner.py:601] Init model | hbm=[(2.3, 31.25)]GiB
+(EngineCore pid=17822) INFO 05-11 09:10:47 [tpu_worker.py:340] Memory statistics | total_hbm_limit_gb=31.25GiB | total_hbm_limit_cap_gb=28.12GiB | total_hbm_used_gb=2.3GiB | total_hbm_avail_gb=25.82GiB
+(EngineCore pid=17822) INFO 05-11 09:10:47 [kv_cache_utils.py:1319] GPU KV cache size: 845,824 tokens
+(EngineCore pid=17822) INFO 05-11 09:10:47 [kv_cache_utils.py:1324] Maximum concurrency for 8,192 tokens per request: 103.25x
+(EngineCore pid=17822) INFO 05-11 09:10:47 [compilation_manager.py:550] Compiling sampling with different input shapes.
+(EngineCore pid=17822) INFO 05-11 09:10:47 [compilation_manager.py:85] Precompile worker0 sample --> {'num_reqs': 8, 'do_sampling': True}
+W0511 09:10:48.077224   17822 pjrt_executable.cc:642] Assume version compatibility. PjRt-IFRT does not track XLA executable versions.
+(EngineCore pid=17822) INFO 05-11 09:10:48 [compilation_manager.py:90] Compilation finished in 0.11 [secs].
+(EngineCore pid=17822) INFO 05-11 09:10:48 [compilation_manager.py:85] Precompile worker0 sample --> {'num_reqs': 8, 'do_sampling': True}
+W0511 09:10:48.176204   17822 pjrt_executable.cc:642] Assume version compatibility. PjRt-IFRT does not track XLA executable versions.
+(EngineCore pid=17822) INFO 05-11 09:10:48 [compilation_manager.py:90] Compilation finished in 0.07 [secs].
+(EngineCore pid=17822) INFO 05-11 09:10:48 [compilation_manager.py:85] Precompile worker0 sample --> {'num_reqs': 8, 'do_sampling': False}
+(EngineCore pid=17822) INFO 05-11 09:10:48 [compilation_manager.py:90] Compilation finished in 0.40 [secs].
+(EngineCore pid=17822) INFO 05-11 09:10:48 [compilation_manager.py:85] Precompile worker0 sample --> {'num_reqs': 8, 'do_sampling': False}
+(EngineCore pid=17822) INFO 05-11 09:10:48 [compilation_manager.py:90] Compilation finished in 0.40 [secs].
+(EngineCore pid=17822) INFO 05-11 09:10:48 [compilation_manager.py:639] Compiling gather_logprobs with different input shapes.
+(EngineCore pid=17822) INFO 05-11 09:10:49 [compilation_manager.py:85] Precompile worker0 gather_logprobs --> {'num_reqs': 8}
+(EngineCore pid=17822) INFO 05-11 09:10:49 [compilation_manager.py:90] Compilation finished in 0.60 [secs].
+(EngineCore pid=17822) INFO 05-11 09:10:51 [kv_cache_manager.py:531] Init kv-cache | num_total_layers=16 | num_blocks=[3304, 3304, 3304, 3304, 3304, 3304, 3304, 3304, 3304, 3304, 3304, 3304, 3304, 3304, 3304, 3304] | regular_attn_layers=16 | regular_attn_shape=(num_blocks, (256, 4, 2, 128)) | regular_attn_sharding=NamedSharding(mesh=Mesh('data': 1, 'model': 1, axis_types=(Auto, Auto)), spec=P('data', None, 'model'), memory_kind=device) | regular_attn_dtype=bfloat16 | hbm=[(28.12, 31.25)]Gb
+(EngineCore pid=17822) INFO 05-11 09:10:51 [compilation_manager.py:95] Precompile all the subgraphs with possible input shapes.
+(EngineCore pid=17822) INFO 05-11 09:10:51 [compilation_manager.py:85] Precompile worker0 backbone --> {'num_tokens': 16}
+(EngineCore pid=17822) WARNING 05-11 09:10:51 [tuned_block_sizes_hd64.py:456] Couldn`t find tuned sizes for the RPA v3 kernel with ('TPU v6e', 256, 'q_bfloat16_kv_bfloat16', 'q_head-32_kv_head-8_head-64', 'max_model_len-8192-sw-None')
+(EngineCore pid=17822) INFO 05-11 09:10:51 [tuned_block_sizes_hd64.py:477] RPA v3 kernel tuned block sizes for ('TPU v6e', 256, 'q_bfloat16_kv_bfloat16', 'q_head-32_kv_head-8_head-64', 'max_model_len-8192-sw-None'): bkv_p=8, bq=16
+W0511 09:10:52.931303   17822 pjrt_executable.cc:642] Assume version compatibility. PjRt-IFRT does not track XLA executable versions.
+(EngineCore pid=17822) INFO 05-11 09:10:53 [compilation_manager.py:90] Compilation finished in 1.24 [secs].
+(EngineCore pid=17822) INFO 05-11 09:10:53 [compilation_manager.py:85] Precompile worker0 backbone --> {'num_tokens': 32}
+(EngineCore pid=17822) INFO 05-11 09:10:53 [tuned_block_sizes_hd64.py:477] RPA v3 kernel tuned block sizes for ('TPU v6e', 256, 'q_bfloat16_kv_bfloat16', 'q_head-32_kv_head-8_head-64', 'max_model_len-8192-sw-None'): bkv_p=8, bq=32
+W0511 09:10:54.117907   17822 pjrt_executable.cc:642] Assume version compatibility. PjRt-IFRT does not track XLA executable versions.
+(EngineCore pid=17822) INFO 05-11 09:10:54 [compilation_manager.py:90] Compilation finished in 1.15 [secs].
+(EngineCore pid=17822) INFO 05-11 09:10:54 [compilation_manager.py:85] Precompile worker0 backbone --> {'num_tokens': 64}
+W0511 09:10:55.736692   17822 pjrt_executable.cc:642] Assume version compatibility. PjRt-IFRT does not track XLA executable versions.
+(EngineCore pid=17822) INFO 05-11 09:10:55 [compilation_manager.py:90] Compilation finished in 1.59 [secs].
+(EngineCore pid=17822) INFO 05-11 09:10:55 [compilation_manager.py:85] Precompile worker0 backbone --> {'num_tokens': 128}
+W0511 09:10:56.908433   17822 pjrt_executable.cc:642] Assume version compatibility. PjRt-IFRT does not track XLA executable versions.
+(EngineCore pid=17822) INFO 05-11 09:10:56 [compilation_manager.py:90] Compilation finished in 1.15 [secs].
+(EngineCore pid=17822) INFO 05-11 09:10:57 [compilation_manager.py:85] Precompile worker0 backbone --> {'num_tokens': 256}
+W0511 09:10:58.072704   17822 pjrt_executable.cc:642] Assume version compatibility. PjRt-IFRT does not track XLA executable versions.
+(EngineCore pid=17822) INFO 05-11 09:10:58 [compilation_manager.py:90] Compilation finished in 1.15 [secs].
+(EngineCore pid=17822) INFO 05-11 09:10:58 [compilation_manager.py:85] Precompile worker0 backbone --> {'num_tokens': 512}
+W0511 09:10:59.260033   17822 pjrt_executable.cc:642] Assume version compatibility. PjRt-IFRT does not track XLA executable versions.
+(EngineCore pid=17822) INFO 05-11 09:10:59 [compilation_manager.py:90] Compilation finished in 1.16 [secs].
+(EngineCore pid=17822) INFO 05-11 09:10:59 [compilation_manager.py:85] Precompile worker0 backbone --> {'num_tokens': 1024}
+W0511 09:11:00.956692   17822 pjrt_executable.cc:642] Assume version compatibility. PjRt-IFRT does not track XLA executable versions.
+(EngineCore pid=17822) INFO 05-11 09:11:01 [compilation_manager.py:90] Compilation finished in 1.66 [secs].
+(EngineCore pid=17822) INFO 05-11 09:11:01 [compilation_manager.py:85] Precompile worker0 backbone --> {'num_tokens': 2048}
+W0511 09:11:02.132277   17822 pjrt_executable.cc:642] Assume version compatibility. PjRt-IFRT does not track XLA executable versions.
+(EngineCore pid=17822) INFO 05-11 09:11:02 [compilation_manager.py:90] Compilation finished in 1.15 [secs].
+(EngineCore pid=17822) INFO 05-11 09:11:02 [compilation_manager.py:85] Precompile worker0 backbone --> {'num_tokens': 4096}
+W0511 09:11:03.306947   17822 pjrt_executable.cc:642] Assume version compatibility. PjRt-IFRT does not track XLA executable versions.
+(EngineCore pid=17822) INFO 05-11 09:11:03 [compilation_manager.py:90] Compilation finished in 1.16 [secs].
+(EngineCore pid=17822) INFO 05-11 09:11:03 [compilation_manager.py:85] Precompile worker0 backbone --> {'num_tokens': 8192}
+W0511 09:11:04.507804   17822 pjrt_executable.cc:642] Assume version compatibility. PjRt-IFRT does not track XLA executable versions.
+(EngineCore pid=17822) INFO 05-11 09:11:04 [compilation_manager.py:90] Compilation finished in 1.18 [secs].
+(EngineCore pid=17822) INFO 05-11 09:11:04 [compilation_manager.py:85] Precompile _substitute_placeholder_token_fn --> {'num_tokens': 16, 'num_reqs': 8}
+(EngineCore pid=17822) /usr/local/lib/python3.12/site-packages/jax/_src/interpreters/mlir.py:1272: UserWarning: Some donated buffers were not usable: int32[16], int32[16].
+(EngineCore pid=17822) See an explanation at https://docs.jax.dev/en/latest/faq.html#buffer-donation.
+(EngineCore pid=17822)   warnings.warn("Some donated buffers were not usable:"
+(EngineCore pid=17822) INFO 05-11 09:11:04 [compilation_manager.py:90] Compilation finished in 0.05 [secs].
+(EngineCore pid=17822) INFO 05-11 09:11:04 [compilation_manager.py:85] Precompile _substitute_placeholder_token_fn --> {'num_tokens': 32, 'num_reqs': 8}
+(EngineCore pid=17822) /usr/local/lib/python3.12/site-packages/jax/_src/interpreters/mlir.py:1272: UserWarning: Some donated buffers were not usable: int32[32], int32[32].
+(EngineCore pid=17822) See an explanation at https://docs.jax.dev/en/latest/faq.html#buffer-donation.
+(EngineCore pid=17822)   warnings.warn("Some donated buffers were not usable:"
+(EngineCore pid=17822) INFO 05-11 09:11:04 [compilation_manager.py:90] Compilation finished in 0.06 [secs].
+(EngineCore pid=17822) INFO 05-11 09:11:04 [compilation_manager.py:85] Precompile _substitute_placeholder_token_fn --> {'num_tokens': 64, 'num_reqs': 8}
+(EngineCore pid=17822) /usr/local/lib/python3.12/site-packages/jax/_src/interpreters/mlir.py:1272: UserWarning: Some donated buffers were not usable: int32[64], int32[64].
+(EngineCore pid=17822) See an explanation at https://docs.jax.dev/en/latest/faq.html#buffer-donation.
+(EngineCore pid=17822)   warnings.warn("Some donated buffers were not usable:"
+(EngineCore pid=17822) INFO 05-11 09:11:04 [compilation_manager.py:90] Compilation finished in 0.08 [secs].
+(EngineCore pid=17822) INFO 05-11 09:11:04 [compilation_manager.py:85] Precompile _substitute_placeholder_token_fn --> {'num_tokens': 128, 'num_reqs': 8}
+(EngineCore pid=17822) /usr/local/lib/python3.12/site-packages/jax/_src/interpreters/mlir.py:1272: UserWarning: Some donated buffers were not usable: int32[128], int32[128].
+(EngineCore pid=17822) See an explanation at https://docs.jax.dev/en/latest/faq.html#buffer-donation.
+(EngineCore pid=17822)   warnings.warn("Some donated buffers were not usable:"
+(EngineCore pid=17822) INFO 05-11 09:11:04 [compilation_manager.py:90] Compilation finished in 0.10 [secs].
+(EngineCore pid=17822) INFO 05-11 09:11:04 [compilation_manager.py:85] Precompile _substitute_placeholder_token_fn --> {'num_tokens': 256, 'num_reqs': 8}
+(EngineCore pid=17822) /usr/local/lib/python3.12/site-packages/jax/_src/interpreters/mlir.py:1272: UserWarning: Some donated buffers were not usable: int32[256], int32[256].
+(EngineCore pid=17822) See an explanation at https://docs.jax.dev/en/latest/faq.html#buffer-donation.
+(EngineCore pid=17822)   warnings.warn("Some donated buffers were not usable:"
+(EngineCore pid=17822) INFO 05-11 09:11:05 [compilation_manager.py:90] Compilation finished in 0.11 [secs].
+(EngineCore pid=17822) INFO 05-11 09:11:05 [compilation_manager.py:85] Precompile _substitute_placeholder_token_fn --> {'num_tokens': 512, 'num_reqs': 8}
+(EngineCore pid=17822) /usr/local/lib/python3.12/site-packages/jax/_src/interpreters/mlir.py:1272: UserWarning: Some donated buffers were not usable: int32[512], int32[512].
+(EngineCore pid=17822) See an explanation at https://docs.jax.dev/en/latest/faq.html#buffer-donation.
+(EngineCore pid=17822)   warnings.warn("Some donated buffers were not usable:"
+(EngineCore pid=17822) INFO 05-11 09:11:05 [compilation_manager.py:90] Compilation finished in 0.12 [secs].
+(EngineCore pid=17822) INFO 05-11 09:11:05 [compilation_manager.py:85] Precompile _substitute_placeholder_token_fn --> {'num_tokens': 1024, 'num_reqs': 8}
+(EngineCore pid=17822) /usr/local/lib/python3.12/site-packages/jax/_src/interpreters/mlir.py:1272: UserWarning: Some donated buffers were not usable: int32[1024], int32[1024].
+(EngineCore pid=17822) See an explanation at https://docs.jax.dev/en/latest/faq.html#buffer-donation.
+(EngineCore pid=17822)   warnings.warn("Some donated buffers were not usable:"
+(EngineCore pid=17822) INFO 05-11 09:11:05 [compilation_manager.py:90] Compilation finished in 0.12 [secs].
+(EngineCore pid=17822) INFO 05-11 09:11:05 [compilation_manager.py:85] Precompile _substitute_placeholder_token_fn --> {'num_tokens': 2048, 'num_reqs': 8}
+(EngineCore pid=17822) /usr/local/lib/python3.12/site-packages/jax/_src/interpreters/mlir.py:1272: UserWarning: Some donated buffers were not usable: int32[2048], int32[2048].
+(EngineCore pid=17822) See an explanation at https://docs.jax.dev/en/latest/faq.html#buffer-donation.
+(EngineCore pid=17822)   warnings.warn("Some donated buffers were not usable:"
+(EngineCore pid=17822) INFO 05-11 09:11:05 [compilation_manager.py:90] Compilation finished in 0.12 [secs].
+(EngineCore pid=17822) INFO 05-11 09:11:05 [compilation_manager.py:85] Precompile _substitute_placeholder_token_fn --> {'num_tokens': 4096, 'num_reqs': 8}
+(EngineCore pid=17822) /usr/local/lib/python3.12/site-packages/jax/_src/interpreters/mlir.py:1272: UserWarning: Some donated buffers were not usable: int32[4096], int32[4096].
+(EngineCore pid=17822) See an explanation at https://docs.jax.dev/en/latest/faq.html#buffer-donation.
+(EngineCore pid=17822)   warnings.warn("Some donated buffers were not usable:"
+(EngineCore pid=17822) INFO 05-11 09:11:05 [compilation_manager.py:90] Compilation finished in 0.12 [secs].
+(EngineCore pid=17822) INFO 05-11 09:11:05 [compilation_manager.py:85] Precompile _substitute_placeholder_token_fn --> {'num_tokens': 8192, 'num_reqs': 8}
+(EngineCore pid=17822) /usr/local/lib/python3.12/site-packages/jax/_src/interpreters/mlir.py:1272: UserWarning: Some donated buffers were not usable: int32[8192], int32[8192].
+(EngineCore pid=17822) See an explanation at https://docs.jax.dev/en/latest/faq.html#buffer-donation.
+(EngineCore pid=17822)   warnings.warn("Some donated buffers were not usable:"
+(EngineCore pid=17822) INFO 05-11 09:11:05 [compilation_manager.py:90] Compilation finished in 0.12 [secs].
+(EngineCore pid=17822) INFO 05-11 09:11:05 [compilation_manager.py:466] Compiling select_from_array with different input shapes.
+(EngineCore pid=17822) INFO 05-11 09:11:05 [compilation_manager.py:445] Compiling select_from_array for worker0 select all logits.
+(EngineCore pid=17822) INFO 05-11 09:11:05 [compilation_manager.py:85] Precompile select_from_array [worker0 select all logits] --> {'array_size': 16, 'index_size': 8}
+(EngineCore pid=17822) INFO 05-11 09:11:05 [compilation_manager.py:90] Compilation finished in 0.05 [secs].
+(EngineCore pid=17822) INFO 05-11 09:11:05 [compilation_manager.py:85] Precompile select_from_array [worker0 select all logits] --> {'array_size': 32, 'index_size': 8}
+(EngineCore pid=17822) INFO 05-11 09:11:05 [compilation_manager.py:90] Compilation finished in 0.04 [secs].
+(EngineCore pid=17822) INFO 05-11 09:11:05 [compilation_manager.py:85] Precompile select_from_array [worker0 select all logits] --> {'array_size': 64, 'index_size': 8}
+(EngineCore pid=17822) INFO 05-11 09:11:05 [compilation_manager.py:90] Compilation finished in 0.05 [secs].
+(EngineCore pid=17822) INFO 05-11 09:11:05 [compilation_manager.py:85] Precompile select_from_array [worker0 select all logits] --> {'array_size': 128, 'index_size': 8}
+(EngineCore pid=17822) INFO 05-11 09:11:05 [compilation_manager.py:90] Compilation finished in 0.06 [secs].
+(EngineCore pid=17822) INFO 05-11 09:11:06 [compilation_manager.py:85] Precompile select_from_array [worker0 select all logits] --> {'array_size': 256, 'index_size': 8}
+(EngineCore pid=17822) INFO 05-11 09:11:06 [compilation_manager.py:90] Compilation finished in 0.08 [secs].
+(EngineCore pid=17822) INFO 05-11 09:11:06 [compilation_manager.py:85] Precompile select_from_array [worker0 select all logits] --> {'array_size': 512, 'index_size': 8}
+(EngineCore pid=17822) INFO 05-11 09:11:06 [compilation_manager.py:90] Compilation finished in 0.12 [secs].
+(EngineCore pid=17822) INFO 05-11 09:11:06 [compilation_manager.py:85] Precompile select_from_array [worker0 select all logits] --> {'array_size': 1024, 'index_size': 8}
+(EngineCore pid=17822) INFO 05-11 09:11:06 [compilation_manager.py:90] Compilation finished in 0.21 [secs].
+(EngineCore pid=17822) INFO 05-11 09:11:06 [compilation_manager.py:85] Precompile select_from_array [worker0 select all logits] --> {'array_size': 2048, 'index_size': 8}
+(EngineCore pid=17822) INFO 05-11 09:11:06 [compilation_manager.py:90] Compilation finished in 0.41 [secs].
+(EngineCore pid=17822) INFO 05-11 09:11:06 [compilation_manager.py:85] Precompile select_from_array [worker0 select all logits] --> {'array_size': 4096, 'index_size': 8}
+(EngineCore pid=17822) INFO 05-11 09:11:07 [compilation_manager.py:90] Compilation finished in 0.03 [secs].
+(EngineCore pid=17822) INFO 05-11 09:11:07 [compilation_manager.py:85] Precompile select_from_array [worker0 select all logits] --> {'array_size': 8192, 'index_size': 8}
+(EngineCore pid=17822) INFO 05-11 09:11:07 [compilation_manager.py:90] Compilation finished in 0.03 [secs].
+(EngineCore pid=17822) INFO 05-11 09:11:07 [compilation_manager.py:513] Compiling compute_logits with different input shapes.
+(EngineCore pid=17822) INFO 05-11 09:11:07 [compilation_manager.py:85] Precompile worker0 compute_logits --> {'num_reqs': 8}
+(EngineCore pid=17822) INFO 05-11 09:11:07 [compilation_manager.py:90] Compilation finished in 0.29 [secs].
+(EngineCore pid=17822) INFO 05-11 09:11:07 [compilation_manager.py:974] Compiling structured_decoding with different input shapes.
+(EngineCore pid=17822) INFO 05-11 09:11:07 [compilation_manager.py:85] Precompile structured_decode --> {'num_reqs': 8}
+(EngineCore pid=17822) INFO 05-11 09:11:08 [compilation_manager.py:90] Compilation finished in 0.76 [secs].
+(EngineCore pid=17822) INFO 05-11 09:11:08 [core.py:299] init engine (profile, create kv cache, warmup model) took 20.32 s (compilation: 17.00 s)
+(EngineCore pid=17822) WARNING 05-11 09:11:08 [vllm.py:903] Inductor compilation was disabled by user settings, optimizations settings that are only active during inductor compilation will be ignored.
+(EngineCore pid=17822) INFO 05-11 09:11:08 [kernel.py:199] Final IR op priority after setting platform defaults: IrOpPriorityConfig(rms_norm=['native'])
+(EngineCore pid=17822) INFO 05-11 09:11:08 [tpu_platform.py:190] Initialized sharding configuration: ShardingConfigManager(total_devices=1, sharding_strategy=ShardingStrategy(tensor_parallelism=1, expert_parallelism=1, sequence_parallelism=1, data_parallelism=1, attention_data_parallelism=1, attention_data_expert_parallelism=1), device_indexes=None)
+(EngineCore pid=17822) INFO 05-11 09:11:08 [tpu_platform.py:245] Using KV cache block size: 256
+(EngineCore pid=17822) INFO 05-11 09:11:08 [tpu_platform.py:256] Force using UniProcExecutor for JAX on single host without pipeline parallelism.
+WARNING 05-11 09:11:08 [tpu_platform.py:317] Pin memory is not supported on TPU.
+
+[2026-05-11 09:11:10.720953] warming up buckets ...
+Rendering prompts:   0%|          | 0/8 [00:00<?, ?it/s]Rendering prompts: 100%|██████████| 8/8 [00:00<00:00, 5648.89it/s]
+Processed prompts:   0%|          | 0/8 [00:00<?, ?it/s, est. speed input: 0.00 toks/s, output: 0.00 toks/s]Processed prompts:  12%|█▎        | 1/8 [00:00<00:01,  5.54it/s, est. speed input: 354.91 toks/s, output: 27.72 toks/s]Processed prompts: 100%|██████████| 8/8 [00:00<00:00,  5.54it/s, est. speed input: 2818.04 toks/s, output: 220.15 toks/s]Processed prompts: 100%|██████████| 8/8 [00:00<00:00, 44.00it/s, est. speed input: 2818.04 toks/s, output: 220.15 toks/s]
+  warmup (il=64, ol=5): 0.18s
+Rendering prompts:   0%|          | 0/8 [00:00<?, ?it/s]Rendering prompts: 100%|██████████| 8/8 [00:00<00:00, 8071.79it/s]
+Processed prompts:   0%|          | 0/8 [00:00<?, ?it/s, est. speed input: 0.00 toks/s, output: 0.00 toks/s]Processed prompts: 100%|██████████| 8/8 [00:00<00:00, 84.98it/s, est. speed input: 11049.83 toks/s, output: 849.93 toks/s]Processed prompts: 100%|██████████| 8/8 [00:00<00:00, 84.86it/s, est. speed input: 11049.83 toks/s, output: 849.93 toks/s]
+  warmup (il=130, ol=10): 0.10s
+Rendering prompts:   0%|          | 0/8 [00:00<?, ?it/s]Rendering prompts: 100%|██████████| 8/8 [00:00<00:00, 7724.32it/s]
+Processed prompts:   0%|          | 0/8 [00:00<?, ?it/s, est. speed input: 0.00 toks/s, output: 0.00 toks/s]Processed prompts:  25%|██▌       | 2/8 [00:00<00:00, 19.78it/s, est. speed input: 5143.40 toks/s, output: 395.61 toks/s]Processed prompts: 100%|██████████| 8/8 [00:00<00:00, 19.78it/s, est. speed input: 20526.74 toks/s, output: 1578.86 toks/s]Processed prompts: 100%|██████████| 8/8 [00:00<00:00, 78.86it/s, est. speed input: 20526.74 toks/s, output: 1578.86 toks/s]
+  warmup (il=260, ol=20): 0.10s
+Rendering prompts:   0%|          | 0/8 [00:00<?, ?it/s]Rendering prompts: 100%|██████████| 8/8 [00:00<00:00, 7172.82it/s]
+Processed prompts:   0%|          | 0/8 [00:00<?, ?it/s, est. speed input: 0.00 toks/s, output: 0.00 toks/s]Processed prompts:  12%|█▎        | 1/8 [00:00<00:01,  5.88it/s, est. speed input: 3056.43 toks/s, output: 235.09 toks/s]Processed prompts: 100%|██████████| 8/8 [00:00<00:00,  5.88it/s, est. speed input: 24245.24 toks/s, output: 1864.94 toks/s]Processed prompts: 100%|██████████| 8/8 [00:00<00:00, 46.60it/s, est. speed input: 24245.24 toks/s, output: 1864.94 toks/s]
+  warmup (il=520, ol=40): 0.17s
+Rendering prompts:   0%|          | 0/8 [00:00<?, ?it/s]Rendering prompts: 100%|██████████| 8/8 [00:00<00:00, 6228.78it/s]
+Processed prompts:   0%|          | 0/8 [00:00<?, ?it/s, est. speed input: 0.00 toks/s, output: 0.00 toks/s]Processed prompts:  12%|█▎        | 1/8 [00:00<00:02,  3.21it/s, est. speed input: 3301.98 toks/s, output: 256.45 toks/s]Processed prompts: 100%|██████████| 8/8 [00:00<00:00,  3.21it/s, est. speed input: 26293.12 toks/s, output: 2042.13 toks/s]Processed prompts: 100%|██████████| 8/8 [00:00<00:00, 25.52it/s, est. speed input: 26293.12 toks/s, output: 2042.13 toks/s]
+  warmup (il=1030, ol=80): 0.32s
+Rendering prompts:   0%|          | 0/8 [00:00<?, ?it/s]Rendering prompts: 100%|██████████| 8/8 [00:00<00:00, 4969.55it/s]
+Processed prompts:   0%|          | 0/8 [00:00<?, ?it/s, est. speed input: 0.00 toks/s, output: 0.00 toks/s]Processed prompts:  12%|█▎        | 1/8 [00:00<00:04,  1.58it/s, est. speed input: 3231.85 toks/s, output: 252.24 toks/s]Processed prompts: 100%|██████████| 8/8 [00:00<00:00,  1.58it/s, est. speed input: 25579.84 toks/s, output: 1996.45 toks/s]Processed prompts: 100%|██████████| 8/8 [00:00<00:00, 12.48it/s, est. speed input: 25579.84 toks/s, output: 1996.45 toks/s]
+  warmup (il=2050, ol=160): 0.64s
+Rendering prompts:   0%|          | 0/8 [00:00<?, ?it/s]Rendering prompts: 100%|██████████| 8/8 [00:00<00:00, 3652.78it/s]
+Processed prompts:   0%|          | 0/8 [00:00<?, ?it/s, est. speed input: 0.00 toks/s, output: 0.00 toks/s]Processed prompts:  12%|█▎        | 1/8 [00:01<00:10,  1.49s/it, est. speed input: 2744.29 toks/s, output: 200.80 toks/s]Processed prompts: 100%|██████████| 8/8 [00:01<00:00,  1.49s/it, est. speed input: 21669.41 toks/s, output: 1585.55 toks/s]Processed prompts: 100%|██████████| 8/8 [00:01<00:00,  5.28it/s, est. speed input: 21669.41 toks/s, output: 1585.55 toks/s]
+  warmup (il=4100, ol=300): 1.52s
+
+[2026-05-11 09:11:13.776995] eval sweep: 50 runs × batch=8
+Rendering prompts:   0%|          | 0/8 [00:00<?, ?it/s]Rendering prompts: 100%|██████████| 8/8 [00:00<00:00, 6203.44it/s]
+Processed prompts:   0%|          | 0/8 [00:00<?, ?it/s, est. speed input: 0.00 toks/s, output: 0.00 toks/s]Processed prompts:  12%|█▎        | 1/8 [00:00<00:01,  5.30it/s, est. speed input: 9279.98 toks/s, output: 233.15 toks/s]Processed prompts:  88%|████████▊ | 7/8 [00:00<00:00, 28.28it/s, est. speed input: 22229.52 toks/s, output: 1468.28 toks/s](EngineCore pid=17822) WARNING 05-11 09:11:14 [tpu_runner.py:808] Should not schedule a request that does nothing!
+Processed prompts: 100%|██████████| 8/8 [00:00<00:00, 28.28it/s, est. speed input: 17567.12 toks/s, output: 1221.70 toks/s]Processed prompts: 100%|██████████| 8/8 [00:00<00:00, 17.05it/s, est. speed input: 17567.12 toks/s, output: 1221.70 toks/s]
+  [run  0]  max_il= 1751  max_ol=  142  OK                   e2e=      471ms  (0.5s)
+Rendering prompts:   0%|          | 0/8 [00:00<?, ?it/s]Rendering prompts: 100%|██████████| 8/8 [00:00<00:00, 6111.92it/s]
+Processed prompts:   0%|          | 0/8 [00:00<?, ?it/s, est. speed input: 0.00 toks/s, output: 0.00 toks/s]Processed prompts:  12%|█▎        | 1/8 [00:00<00:01,  5.73it/s, est. speed input: 8801.41 toks/s, output: 223.45 toks/s]Processed prompts:  75%|███████▌  | 6/8 [00:00<00:00, 23.84it/s, est. speed input: 22814.17 toks/s, output: 1067.22 toks/s](EngineCore pid=17822) WARNING 05-11 09:11:14 [tpu_runner.py:808] Should not schedule a request that does nothing!
+Processed prompts: 100%|██████████| 8/8 [00:00<00:00, 23.84it/s, est. speed input: 24299.24 toks/s, output: 1392.57 toks/s]Processed prompts: 100%|██████████| 8/8 [00:00<00:00, 22.50it/s, est. speed input: 24299.24 toks/s, output: 1392.57 toks/s]
+  [run  1]  max_il= 1673  max_ol=  101  OK                   e2e=      357ms  (0.4s)
+Rendering prompts:   0%|          | 0/8 [00:00<?, ?it/s]Rendering prompts: 100%|██████████| 8/8 [00:00<00:00, 7061.12it/s]
+Processed prompts:   0%|          | 0/8 [00:00<?, ?it/s, est. speed input: 0.00 toks/s, output: 0.00 toks/s]Processed prompts:  12%|█▎        | 1/8 [00:00<00:01,  4.53it/s, est. speed input: 1716.37 toks/s, output: 267.17 toks/s]Processed prompts:  75%|███████▌  | 6/8 [00:00<00:00, 22.10it/s, est. speed input: 8524.07 toks/s, output: 1338.87 toks/s](EngineCore pid=17822) WARNING 05-11 09:11:15 [tpu_runner.py:808] Should not schedule a request that does nothing!
+Processed prompts: 100%|██████████| 8/8 [00:00<00:00, 22.10it/s, est. speed input: 12902.13 toks/s, output: 1778.56 toks/s]Processed prompts: 100%|██████████| 8/8 [00:00<00:00, 22.29it/s, est. speed input: 12902.13 toks/s, output: 1778.56 toks/s]
+  [run  2]  max_il= 1027  max_ol=  108  OK                   e2e=      360ms  (0.4s)
+Rendering prompts:   0%|          | 0/8 [00:00<?, ?it/s]Rendering prompts: 100%|██████████| 8/8 [00:00<00:00, 6549.76it/s]
+Processed prompts:   0%|          | 0/8 [00:00<?, ?it/s, est. speed input: 0.00 toks/s, output: 0.00 toks/s]Processed prompts:  25%|██▌       | 2/8 [00:00<00:00, 11.21it/s, est. speed input: 8652.36 toks/s, output: 308.39 toks/s]Processed prompts: 100%|██████████| 8/8 [00:00<00:00, 11.21it/s, est. speed input: 29320.52 toks/s, output: 1646.40 toks/s]Processed prompts: 100%|██████████| 8/8 [00:00<00:00, 33.67it/s, est. speed input: 29320.52 toks/s, output: 1646.40 toks/s]
+  [run  3]  max_il= 1340  max_ol=   63  OK                   e2e=      239ms  (0.3s)
+Rendering prompts:   0%|          | 0/8 [00:00<?, ?it/s]Rendering prompts: 100%|██████████| 8/8 [00:00<00:00, 6455.26it/s]
+Processed prompts:   0%|          | 0/8 [00:00<?, ?it/s, est. speed input: 0.00 toks/s, output: 0.00 toks/s]Processed prompts:  12%|█▎        | 1/8 [00:00<00:01,  5.84it/s, est. speed input: 6641.96 toks/s, output: 227.60 toks/s](EngineCore pid=17822) WARNING 05-11 09:11:15 [tpu_runner.py:808] Should not schedule a request that does nothing!
+Processed prompts: 100%|██████████| 8/8 [00:00<00:00,  5.84it/s, est. speed input: 29410.91 toks/s, output: 1643.69 toks/s]Processed prompts: 100%|██████████| 8/8 [00:00<00:00, 30.85it/s, est. speed input: 29410.91 toks/s, output: 1643.69 toks/s]
+  [run  4]  max_il= 2033  max_ol=   70  OK                   e2e=      261ms  (0.3s)
+Rendering prompts:   0%|          | 0/8 [00:00<?, ?it/s]Rendering prompts: 100%|██████████| 8/8 [00:00<00:00, 6236.88it/s]
+Processed prompts:   0%|          | 0/8 [00:00<?, ?it/s, est. speed input: 0.00 toks/s, output: 0.00 toks/s]Processed prompts:  12%|█▎        | 1/8 [00:00<00:01,  5.86it/s, est. speed input: 5177.95 toks/s, output: 216.70 toks/s](EngineCore pid=17822) WARNING 05-11 09:11:15 [tpu_runner.py:808] Should not schedule a request that does nothing!
+Processed prompts: 100%|██████████| 8/8 [00:00<00:00,  5.86it/s, est. speed input: 31032.20 toks/s, output: 1617.58 toks/s]Processed prompts: 100%|██████████| 8/8 [00:00<00:00, 29.66it/s, est. speed input: 31032.20 toks/s, output: 1617.58 toks/s]
+  [run  5]  max_il= 1879  max_ol=   72  OK                   e2e=      271ms  (0.3s)
+Rendering prompts:   0%|          | 0/8 [00:00<?, ?it/s]Rendering prompts: 100%|██████████| 8/8 [00:00<00:00, 6744.61it/s]
+Processed prompts:   0%|          | 0/8 [00:00<?, ?it/s, est. speed input: 0.00 toks/s, output: 0.00 toks/s]Processed prompts:  12%|█▎        | 1/8 [00:00<00:01,  5.08it/s, est. speed input: 2246.86 toks/s, output: 249.06 toks/s]Processed prompts:  88%|████████▊ | 7/8 [00:00<00:00, 25.58it/s, est. speed input: 15876.22 toks/s, output: 1377.23 toks/s](EngineCore pid=17822) WARNING 05-11 09:11:16 [tpu_runner.py:808] Should not schedule a request that does nothing!
+Processed prompts: 100%|██████████| 8/8 [00:00<00:00, 25.58it/s, est. speed input: 12790.70 toks/s, output: 1300.85 toks/s]Processed prompts: 100%|██████████| 8/8 [00:00<00:00, 18.00it/s, est. speed input: 12790.70 toks/s, output: 1300.85 toks/s]
+  [run  6]  max_il= 1292  max_ol=  136  OK                   e2e=      446ms  (0.5s)
+Rendering prompts:   0%|          | 0/8 [00:00<?, ?it/s]Rendering prompts: 100%|██████████| 8/8 [00:00<00:00, 7038.90it/s]
+Processed prompts:   0%|          | 0/8 [00:00<?, ?it/s, est. speed input: 0.00 toks/s, output: 0.00 toks/s]Processed prompts:  12%|█▎        | 1/8 [00:00<00:00,  7.43it/s, est. speed input: 6226.18 toks/s, output: 215.44 toks/s](EngineCore pid=17822) WARNING 05-11 09:11:16 [tpu_runner.py:808] Should not schedule a request that does nothing!
+Processed prompts: 100%|██████████| 8/8 [00:00<00:00,  7.43it/s, est. speed input: 20044.52 toks/s, output: 1633.68 toks/s]Processed prompts: 100%|██████████| 8/8 [00:00<00:00, 34.10it/s, est. speed input: 20044.52 toks/s, output: 1633.68 toks/s]
+  [run  7]  max_il=  838  max_ol=   64  OK                   e2e=      236ms  (0.2s)
+Rendering prompts:   0%|          | 0/8 [00:00<?, ?it/s]Rendering prompts: 100%|██████████| 8/8 [00:00<00:00, 6470.20it/s]
+Processed prompts:   0%|          | 0/8 [00:00<?, ?it/s, est. speed input: 0.00 toks/s, output: 0.00 toks/s]Processed prompts:  12%|█▎        | 1/8 [00:00<00:00,  7.96it/s, est. speed input: 3886.48 toks/s, output: 191.11 toks/s]Processed prompts:  38%|███▊      | 3/8 [00:00<00:00, 13.11it/s, est. speed input: 7802.57 toks/s, output: 471.98 toks/s]Processed prompts:  88%|████████▊ | 7/8 [00:00<00:00, 22.35it/s, est. speed input: 14774.21 toks/s, output: 1248.12 toks/s](EngineCore pid=17822) WARNING 05-11 09:11:16 [tpu_runner.py:808] Should not schedule a request that does nothing!
+Processed prompts: 100%|██████████| 8/8 [00:00<00:00, 22.35it/s, est. speed input: 17309.91 toks/s, output: 1396.92 toks/s]Processed prompts: 100%|██████████| 8/8 [00:00<00:00, 19.33it/s, est. speed input: 17309.91 toks/s, output: 1396.92 toks/s]
+  [run  8]  max_il= 1800  max_ol=  125  OK                   e2e=      416ms  (0.4s)
+Rendering prompts:   0%|          | 0/8 [00:00<?, ?it/s]Rendering prompts: 100%|██████████| 8/8 [00:00<00:00, 6208.04it/s]
+Processed prompts:   0%|          | 0/8 [00:00<?, ?it/s, est. speed input: 0.00 toks/s, output: 0.00 toks/s]Processed prompts:  12%|█▎        | 1/8 [00:00<00:01,  5.30it/s, est. speed input: 1834.28 toks/s, output: 238.54 toks/s](EngineCore pid=17822) WARNING 05-11 09:11:17 [tpu_runner.py:808] Should not schedule a request that does nothing!
+Processed prompts: 100%|██████████| 8/8 [00:00<00:00, 25.16it/s, est. speed input: 21474.77 toks/s, output: 1486.57 toks/s]Processed prompts: 100%|██████████| 8/8 [00:00<00:00, 25.16it/s, est. speed input: 21474.77 toks/s, output: 1486.57 toks/s]Processed prompts: 100%|██████████| 8/8 [00:00<00:00, 22.05it/s, est. speed input: 21474.77 toks/s, output: 1486.57 toks/s]
+  [run  9]  max_il= 2055  max_ol=  108  OK                   e2e=      364ms  (0.4s)
+Rendering prompts:   0%|          | 0/8 [00:00<?, ?it/s]Rendering prompts: 100%|██████████| 8/8 [00:00<00:00, 6297.75it/s]
+Processed prompts:   0%|          | 0/8 [00:00<?, ?it/s, est. speed input: 0.00 toks/s, output: 0.00 toks/s]Processed prompts:  12%|█▎        | 1/8 [00:00<00:01,  4.69it/s, est. speed input: 10468.65 toks/s, output: 248.79 toks/s]Processed prompts:  75%|███████▌  | 6/8 [00:00<00:00, 21.79it/s, est. speed input: 19067.67 toks/s, output: 1373.11 toks/s](EngineCore pid=17822) WARNING 05-11 09:11:17 [tpu_runner.py:808] Should not schedule a request that does nothing!
+Processed prompts: 100%|██████████| 8/8 [00:00<00:00, 21.79it/s, est. speed input: 19572.44 toks/s, output: 1650.65 toks/s]Processed prompts: 100%|██████████| 8/8 [00:00<00:00, 19.47it/s, est. speed input: 19572.44 toks/s, output: 1650.65 toks/s]
+  [run 10]  max_il= 2230  max_ol=  125  OK                   e2e=      413ms  (0.4s)
+Rendering prompts:   0%|          | 0/8 [00:00<?, ?it/s]Rendering prompts: 100%|██████████| 8/8 [00:00<00:00, 6836.68it/s]
+Processed prompts:   0%|          | 0/8 [00:00<?, ?it/s, est. speed input: 0.00 toks/s, output: 0.00 toks/s]Processed prompts:  25%|██▌       | 2/8 [00:00<00:00, 11.81it/s, est. speed input: 5517.64 toks/s, output: 330.79 toks/s]Processed prompts:  88%|████████▊ | 7/8 [00:00<00:00, 25.90it/s, est. speed input: 14876.18 toks/s, output: 1416.71 toks/s](EngineCore pid=17822) WARNING 05-11 09:11:18 [tpu_runner.py:808] Should not schedule a request that does nothing!
+Processed prompts: 100%|██████████| 8/8 [00:00<00:00, 25.90it/s, est. speed input: 15922.22 toks/s, output: 1669.67 toks/s]Processed prompts: 100%|██████████| 8/8 [00:00<00:00, 25.83it/s, est. speed input: 15922.22 toks/s, output: 1669.67 toks/s]
+  [run 11]  max_il=  936  max_ol=   95  OK                   e2e=      311ms  (0.3s)
+Rendering prompts:   0%|          | 0/8 [00:00<?, ?it/s]Rendering prompts: 100%|██████████| 8/8 [00:00<00:00, 6236.88it/s]
+Processed prompts:   0%|          | 0/8 [00:00<?, ?it/s, est. speed input: 0.00 toks/s, output: 0.00 toks/s]Processed prompts:  12%|█▎        | 1/8 [00:00<00:01,  5.68it/s, est. speed input: 2084.62 toks/s, output: 238.54 toks/s]Processed prompts: 100%|██████████| 8/8 [00:00<00:00,  5.68it/s, est. speed input: 30756.20 toks/s, output: 1776.53 toks/s]Processed prompts: 100%|██████████| 8/8 [00:00<00:00, 30.35it/s, est. speed input: 30756.20 toks/s, output: 1776.53 toks/s]
+  [run 12]  max_il= 1623  max_ol=   75  OK                   e2e=      265ms  (0.3s)
+Rendering prompts:   0%|          | 0/8 [00:00<?, ?it/s]Rendering prompts: 100%|██████████| 8/8 [00:00<00:00, 6861.85it/s]
+Processed prompts:   0%|          | 0/8 [00:00<?, ?it/s, est. speed input: 0.00 toks/s, output: 0.00 toks/s]Processed prompts:  12%|█▎        | 1/8 [00:00<00:01,  6.10it/s, est. speed input: 3006.44 toks/s, output: 237.81 toks/s]Processed prompts:  88%|████████▊ | 7/8 [00:00<00:00, 29.51it/s, est. speed input: 15456.57 toks/s, output: 1502.16 toks/s](EngineCore pid=17822) WARNING 05-11 09:11:18 [tpu_runner.py:808] Should not schedule a request that does nothing!
+Processed prompts: 100%|██████████| 8/8 [00:00<00:00, 29.51it/s, est. speed input: 17439.45 toks/s, output: 1639.90 toks/s]Processed prompts: 100%|██████████| 8/8 [00:00<00:00, 25.81it/s, est. speed input: 17439.45 toks/s, output: 1639.90 toks/s]
+  [run 13]  max_il= 1132  max_ol=   93  OK                   e2e=      311ms  (0.3s)
+Rendering prompts:   0%|          | 0/8 [00:00<?, ?it/s]Rendering prompts: 100%|██████████| 8/8 [00:00<00:00, 6382.81it/s]
+Processed prompts:   0%|          | 0/8 [00:00<?, ?it/s, est. speed input: 0.00 toks/s, output: 0.00 toks/s]Processed prompts:  12%|█▎        | 1/8 [00:00<00:01,  5.74it/s, est. speed input: 2308.89 toks/s, output: 229.72 toks/s]Processed prompts:  75%|███████▌  | 6/8 [00:00<00:00, 19.85it/s, est. speed input: 13456.08 toks/s, output: 1131.35 toks/s](EngineCore pid=17822) WARNING 05-11 09:11:19 [tpu_runner.py:808] Should not schedule a request that does nothing!
+Processed prompts: 100%|██████████| 8/8 [00:00<00:00, 19.85it/s, est. speed input: 19561.83 toks/s, output: 1594.26 toks/s]Processed prompts: 100%|██████████| 8/8 [00:00<00:00, 21.36it/s, est. speed input: 19561.83 toks/s, output: 1594.26 toks/s]
+  [run 14]  max_il= 1685  max_ol=  110  OK                   e2e=      376ms  (0.4s)
+Rendering prompts:   0%|          | 0/8 [00:00<?, ?it/s]Rendering prompts: 100%|██████████| 8/8 [00:00<00:00, 6347.79it/s]
+Processed prompts:   0%|          | 0/8 [00:00<?, ?it/s, est. speed input: 0.00 toks/s, output: 0.00 toks/s]Processed prompts:  12%|█▎        | 1/8 [00:00<00:01,  5.41it/s, est. speed input: 2551.92 toks/s, output: 237.87 toks/s](EngineCore pid=17822) WARNING 05-11 09:11:19 [tpu_runner.py:808] Should not schedule a request that does nothing!
+Processed prompts: 100%|██████████| 8/8 [00:00<00:00, 24.33it/s, est. speed input: 19481.25 toks/s, output: 1266.07 toks/s]Processed prompts: 100%|██████████| 8/8 [00:00<00:00, 24.33it/s, est. speed input: 19481.25 toks/s, output: 1266.07 toks/s]Processed prompts: 100%|██████████| 8/8 [00:00<00:00, 21.49it/s, est. speed input: 19481.25 toks/s, output: 1266.07 toks/s]
+  [run 15]  max_il= 1563  max_ol=  114  OK                   e2e=      374ms  (0.4s)
+Rendering prompts:   0%|          | 0/8 [00:00<?, ?it/s]Rendering prompts: 100%|██████████| 8/8 [00:00<00:00, 6570.28it/s]
+Processed prompts:   0%|          | 0/8 [00:00<?, ?it/s, est. speed input: 0.00 toks/s, output: 0.00 toks/s]Processed prompts:  12%|█▎        | 1/8 [00:00<00:01,  6.33it/s, est. speed input: 2711.64 toks/s, output: 240.73 toks/s](EngineCore pid=17822) WARNING 05-11 09:11:19 [tpu_runner.py:808] Should not schedule a request that does nothing!
+Processed prompts: 100%|██████████| 8/8 [00:00<00:00, 36.39it/s, est. speed input: 26419.18 toks/s, output: 1683.72 toks/s]Processed prompts: 100%|██████████| 8/8 [00:00<00:00, 36.39it/s, est. speed input: 26419.18 toks/s, output: 1683.72 toks/s]Processed prompts: 100%|██████████| 8/8 [00:00<00:00, 30.87it/s, est. speed input: 26419.18 toks/s, output: 1683.72 toks/s]
+  [run 16]  max_il= 1817  max_ol=   73  OK                   e2e=      261ms  (0.3s)
+Rendering prompts:   0%|          | 0/8 [00:00<?, ?it/s]Rendering prompts: 100%|██████████| 8/8 [00:00<00:00, 7034.47it/s]
+Processed prompts:   0%|          | 0/8 [00:00<?, ?it/s, est. speed input: 0.00 toks/s, output: 0.00 toks/s]Processed prompts:  12%|█▎        | 1/8 [00:00<00:00,  8.82it/s, est. speed input: 1331.38 toks/s, output: 193.95 toks/s]Processed prompts:  38%|███▊      | 3/8 [00:00<00:00, 13.53it/s, est. speed input: 6802.28 toks/s, output: 539.35 toks/s](EngineCore pid=17822) WARNING 05-11 09:11:20 [tpu_runner.py:808] Should not schedule a request that does nothing!
+Processed prompts: 100%|██████████| 8/8 [00:00<00:00, 13.53it/s, est. speed input: 17460.21 toks/s, output: 1760.10 toks/s]Processed prompts: 100%|██████████| 8/8 [00:00<00:00, 28.26it/s, est. speed input: 17460.21 toks/s, output: 1760.10 toks/s]
+  [run 17]  max_il=  886  max_ol=   81  OK                   e2e=      285ms  (0.3s)
+Rendering prompts:   0%|          | 0/8 [00:00<?, ?it/s]Rendering prompts: 100%|██████████| 8/8 [00:00<00:00, 7292.86it/s]
+Processed prompts:   0%|          | 0/8 [00:00<?, ?it/s, est. speed input: 0.00 toks/s, output: 0.00 toks/s]Processed prompts:  12%|█▎        | 1/8 [00:00<00:01,  6.08it/s, est. speed input: 1488.89 toks/s, output: 273.44 toks/s](EngineCore pid=17822) WARNING 05-11 09:11:20 [tpu_runner.py:808] Should not schedule a request that does nothing!
+Processed prompts: 100%|██████████| 8/8 [00:00<00:00, 34.42it/s, est. speed input: 16010.16 toks/s, output: 1666.13 toks/s]Processed prompts: 100%|██████████| 8/8 [00:00<00:00, 34.42it/s, est. speed input: 16010.16 toks/s, output: 1666.13 toks/s]Processed prompts: 100%|██████████| 8/8 [00:00<00:00, 29.27it/s, est. speed input: 16010.16 toks/s, output: 1666.13 toks/s]
+  [run 18]  max_il=  868  max_ol=   83  OK                   e2e=      275ms  (0.3s)
+Rendering prompts:   0%|          | 0/8 [00:00<?, ?it/s]Rendering prompts: 100%|██████████| 8/8 [00:00<00:00, 6684.15it/s]
+Processed prompts:   0%|          | 0/8 [00:00<?, ?it/s, est. speed input: 0.00 toks/s, output: 0.00 toks/s]Processed prompts:  12%|█▎        | 1/8 [00:00<00:00,  7.52it/s, est. speed input: 14256.90 toks/s, output: 225.56 toks/s]Processed prompts:  88%|████████▊ | 7/8 [00:00<00:00, 29.05it/s, est. speed input: 19617.36 toks/s, output: 1304.80 toks/s](EngineCore pid=17822) WARNING 05-11 09:11:20 [tpu_runner.py:808] Should not schedule a request that does nothing!
+Processed prompts: 100%|██████████| 8/8 [00:00<00:00, 29.05it/s, est. speed input: 23056.52 toks/s, output: 1542.94 toks/s]Processed prompts: 100%|██████████| 8/8 [00:00<00:00, 28.30it/s, est. speed input: 23056.52 toks/s, output: 1542.94 toks/s]
+  [run 19]  max_il= 1896  max_ol=   83  OK                   e2e=      284ms  (0.3s)
+Rendering prompts:   0%|          | 0/8 [00:00<?, ?it/s]Rendering prompts: 100%|██████████| 8/8 [00:00<00:00, 6810.32it/s]
+Processed prompts:   0%|          | 0/8 [00:00<?, ?it/s, est. speed input: 0.00 toks/s, output: 0.00 toks/s]Processed prompts:  12%|█▎        | 1/8 [00:00<00:01,  5.77it/s, est. speed input: 3209.95 toks/s, output: 242.46 toks/s]Processed prompts:  75%|███████▌  | 6/8 [00:00<00:00, 23.61it/s, est. speed input: 15818.43 toks/s, output: 1145.17 toks/s](EngineCore pid=17822) WARNING 05-11 09:11:21 [tpu_runner.py:808] Should not schedule a request that does nothing!
+Processed prompts: 100%|██████████| 8/8 [00:00<00:00, 23.61it/s, est. speed input: 14487.90 toks/s, output: 1387.82 toks/s]Processed prompts: 100%|██████████| 8/8 [00:00<00:00, 20.55it/s, est. speed input: 14487.90 toks/s, output: 1387.82 toks/s]
+  [run 20]  max_il= 1060  max_ol=  119  OK                   e2e=      391ms  (0.4s)
+Rendering prompts:   0%|          | 0/8 [00:00<?, ?it/s]Rendering prompts: 100%|██████████| 8/8 [00:00<00:00, 6860.44it/s]
+Processed prompts:   0%|          | 0/8 [00:00<?, ?it/s, est. speed input: 0.00 toks/s, output: 0.00 toks/s]Processed prompts:  12%|█▎        | 1/8 [00:00<00:01,  5.10it/s, est. speed input: 4925.85 toks/s, output: 255.20 toks/s](EngineCore pid=17822) WARNING 05-11 09:11:21 [tpu_runner.py:808] Should not schedule a request that does nothing!
+Processed prompts: 100%|██████████| 8/8 [00:00<00:00, 26.90it/s, est. speed input: 16325.19 toks/s, output: 1585.50 toks/s]Processed prompts: 100%|██████████| 8/8 [00:00<00:00, 26.90it/s, est. speed input: 16325.19 toks/s, output: 1585.50 toks/s]Processed prompts: 100%|██████████| 8/8 [00:00<00:00, 23.17it/s, est. speed input: 16325.19 toks/s, output: 1585.50 toks/s]
+  [run 21]  max_il= 1259  max_ol=  102  OK                   e2e=      347ms  (0.4s)
+Rendering prompts:   0%|          | 0/8 [00:00<?, ?it/s]Rendering prompts: 100%|██████████| 8/8 [00:00<00:00, 6399.85it/s]
+Processed prompts:   0%|          | 0/8 [00:00<?, ?it/s, est. speed input: 0.00 toks/s, output: 0.00 toks/s]Processed prompts:  12%|█▎        | 1/8 [00:00<00:01,  6.30it/s, est. speed input: 5533.24 toks/s, output: 220.55 toks/s]Processed prompts:  62%|██████▎   | 5/8 [00:00<00:00, 19.38it/s, est. speed input: 13911.38 toks/s, output: 1037.45 toks/s](EngineCore pid=17822) WARNING 05-11 09:11:21 [tpu_runner.py:808] Should not schedule a request that does nothing!
+Processed prompts: 100%|██████████| 8/8 [00:00<00:00, 17.00it/s, est. speed input: 14976.73 toks/s, output: 1331.81 toks/s]Processed prompts: 100%|██████████| 8/8 [00:00<00:00, 17.00it/s, est. speed input: 14976.73 toks/s, output: 1331.81 toks/s]Processed prompts: 100%|██████████| 8/8 [00:00<00:00, 16.31it/s, est. speed input: 14976.73 toks/s, output: 1331.81 toks/s]
+  [run 22]  max_il= 1468  max_ol=  152  OK                   e2e=      492ms  (0.5s)
+Rendering prompts:   0%|          | 0/8 [00:00<?, ?it/s]Rendering prompts: 100%|██████████| 8/8 [00:00<00:00, 6369.48it/s]
+Processed prompts:   0%|          | 0/8 [00:00<?, ?it/s, est. speed input: 0.00 toks/s, output: 0.00 toks/s]Processed prompts:  12%|█▎        | 1/8 [00:00<00:01,  5.91it/s, est. speed input: 1630.13 toks/s, output: 236.23 toks/s]Processed prompts:  88%|████████▊ | 7/8 [00:00<00:00, 29.37it/s, est. speed input: 19419.72 toks/s, output: 1462.86 toks/s](EngineCore pid=17822) WARNING 05-11 09:11:22 [tpu_runner.py:808] Should not schedule a request that does nothing!
+Processed prompts: 100%|██████████| 8/8 [00:00<00:00, 29.37it/s, est. speed input: 16293.62 toks/s, output: 1211.47 toks/s]Processed prompts: 100%|██████████| 8/8 [00:00<00:00, 17.68it/s, est. speed input: 16293.62 toks/s, output: 1211.47 toks/s]
+  [run 23]  max_il= 1954  max_ol=  140  OK                   e2e=      454ms  (0.5s)
+Rendering prompts:   0%|          | 0/8 [00:00<?, ?it/s]Rendering prompts: 100%|██████████| 8/8 [00:00<00:00, 6796.52it/s]
+Processed prompts:   0%|          | 0/8 [00:00<?, ?it/s, est. speed input: 0.00 toks/s, output: 0.00 toks/s]Processed prompts:  12%|█▎        | 1/8 [00:00<00:01,  5.41it/s, est. speed input: 1304.84 toks/s, output: 238.21 toks/s]Processed prompts:  75%|███████▌  | 6/8 [00:00<00:00, 24.14it/s, est. speed input: 12644.50 toks/s, output: 1207.45 toks/s](EngineCore pid=17822) WARNING 05-11 09:11:22 [tpu_runner.py:808] Should not schedule a request that does nothing!
+Processed prompts: 100%|██████████| 8/8 [00:00<00:00, 24.14it/s, est. speed input: 15064.24 toks/s, output: 1456.11 toks/s]Processed prompts: 100%|██████████| 8/8 [00:00<00:00, 20.61it/s, est. speed input: 15064.24 toks/s, output: 1456.11 toks/s]
+  [run 24]  max_il= 1460  max_ol=  117  OK                   e2e=      390ms  (0.4s)
+Rendering prompts:   0%|          | 0/8 [00:00<?, ?it/s]Rendering prompts: 100%|██████████| 8/8 [00:00<00:00, 6781.41it/s]
+Processed prompts:   0%|          | 0/8 [00:00<?, ?it/s, est. speed input: 0.00 toks/s, output: 0.00 toks/s]Processed prompts:  12%|█▎        | 1/8 [00:00<00:01,  6.35it/s, est. speed input: 8384.58 toks/s, output: 228.47 toks/s]Processed prompts:  88%|████████▊ | 7/8 [00:00<00:00, 30.91it/s, est. speed input: 18906.98 toks/s, output: 1367.21 toks/s](EngineCore pid=17822) WARNING 05-11 09:11:23 [tpu_runner.py:808] Should not schedule a request that does nothing!
+Processed prompts: 100%|██████████| 8/8 [00:00<00:00, 30.91it/s, est. speed input: 14628.90 toks/s, output: 1241.09 toks/s]Processed prompts: 100%|██████████| 8/8 [00:00<00:00, 20.76it/s, est. speed input: 14628.90 toks/s, output: 1241.09 toks/s]
+  [run 25]  max_il= 1321  max_ol=  117  OK                   e2e=      387ms  (0.4s)
+Rendering prompts:   0%|          | 0/8 [00:00<?, ?it/s]Rendering prompts: 100%|██████████| 8/8 [00:00<00:00, 7078.99it/s]
+Processed prompts:   0%|          | 0/8 [00:00<?, ?it/s, est. speed input: 0.00 toks/s, output: 0.00 toks/s]Processed prompts:  12%|█▎        | 1/8 [00:00<00:00,  7.20it/s, est. speed input: 4232.18 toks/s, output: 266.28 toks/s]Processed prompts:  75%|███████▌  | 6/8 [00:00<00:00, 27.50it/s, est. speed input: 15403.83 toks/s, output: 1301.33 toks/s](EngineCore pid=17822) WARNING 05-11 09:11:23 [tpu_runner.py:808] Should not schedule a request that does nothing!
+Processed prompts: 100%|██████████| 8/8 [00:00<00:00, 27.50it/s, est. speed input: 18348.54 toks/s, output: 1807.39 toks/s]Processed prompts: 100%|██████████| 8/8 [00:00<00:00, 29.98it/s, est. speed input: 18348.54 toks/s, output: 1807.39 toks/s]
+  [run 26]  max_il=  938  max_ol=   81  OK                   e2e=      268ms  (0.3s)
+Rendering prompts:   0%|          | 0/8 [00:00<?, ?it/s]Rendering prompts: 100%|██████████| 8/8 [00:00<00:00, 6253.16it/s]
+Processed prompts:   0%|          | 0/8 [00:00<?, ?it/s, est. speed input: 0.00 toks/s, output: 0.00 toks/s]Processed prompts:  12%|█▎        | 1/8 [00:00<00:00,  8.61it/s, est. speed input: 13397.06 toks/s, output: 172.28 toks/s]Processed prompts:  50%|█████     | 4/8 [00:00<00:00, 17.17it/s, est. speed input: 15532.15 toks/s, output: 659.11 toks/s](EngineCore pid=17822) WARNING 05-11 09:11:23 [tpu_runner.py:808] Should not schedule a request that does nothing!
+Processed prompts: 100%|██████████| 8/8 [00:00<00:00, 17.17it/s, est. speed input: 27457.71 toks/s, output: 1592.08 toks/s]Processed prompts: 100%|██████████| 8/8 [00:00<00:00, 26.97it/s, est. speed input: 27457.71 toks/s, output: 1592.08 toks/s]
+  [run 27]  max_il= 1555  max_ol=   84  OK                   e2e=      298ms  (0.3s)
+Rendering prompts:   0%|          | 0/8 [00:00<?, ?it/s]Rendering prompts: 100%|██████████| 8/8 [00:00<00:00, 6811.70it/s]
+Processed prompts:   0%|          | 0/8 [00:00<?, ?it/s, est. speed input: 0.00 toks/s, output: 0.00 toks/s]Processed prompts:  12%|█▎        | 1/8 [00:00<00:01,  5.91it/s, est. speed input: 3116.68 toks/s, output: 236.54 toks/s](EngineCore pid=17822) WARNING 05-11 09:11:24 [tpu_runner.py:808] Should not schedule a request that does nothing!
+Processed prompts: 100%|██████████| 8/8 [00:00<00:00,  5.91it/s, est. speed input: 26081.59 toks/s, output: 1857.76 toks/s]Processed prompts: 100%|██████████| 8/8 [00:00<00:00, 35.97it/s, est. speed input: 26081.59 toks/s, output: 1857.76 toks/s]
+  [run 28]  max_il=  956  max_ol=   60  OK                   e2e=      224ms  (0.2s)
+Rendering prompts:   0%|          | 0/8 [00:00<?, ?it/s]Rendering prompts: 100%|██████████| 8/8 [00:00<00:00, 7019.76it/s]
+Processed prompts:   0%|          | 0/8 [00:00<?, ?it/s, est. speed input: 0.00 toks/s, output: 0.00 toks/s]Processed prompts:  25%|██▌       | 2/8 [00:00<00:00, 11.16it/s, est. speed input: 8608.20 toks/s, output: 334.71 toks/s]Processed prompts:  88%|████████▊ | 7/8 [00:00<00:00, 21.17it/s, est. speed input: 11451.82 toks/s, output: 1174.05 toks/s](EngineCore pid=17822) WARNING 05-11 09:11:24 [tpu_runner.py:808] Should not schedule a request that does nothing!
+Processed prompts: 100%|██████████| 8/8 [00:00<00:00, 21.17it/s, est. speed input: 12246.34 toks/s, output: 1271.02 toks/s]Processed prompts: 100%|██████████| 8/8 [00:00<00:00, 18.38it/s, est. speed input: 12246.34 toks/s, output: 1271.02 toks/s]
+  [run 29]  max_il= 1251  max_ol=  135  OK                   e2e=      437ms  (0.4s)
+Rendering prompts:   0%|          | 0/8 [00:00<?, ?it/s]Rendering prompts: 100%|██████████| 8/8 [00:00<00:00, 6285.96it/s]
+Processed prompts:   0%|          | 0/8 [00:00<?, ?it/s, est. speed input: 0.00 toks/s, output: 0.00 toks/s]Processed prompts:  12%|█▎        | 1/8 [00:00<00:01,  5.27it/s, est. speed input: 1987.33 toks/s, output: 221.38 toks/s]Processed prompts:  62%|██████▎   | 5/8 [00:00<00:00, 20.02it/s, est. speed input: 12667.07 toks/s, output: 963.27 toks/s](EngineCore pid=17822) WARNING 05-11 09:11:24 [tpu_runner.py:808] Should not schedule a request that does nothing!
+Processed prompts: 100%|██████████| 8/8 [00:00<00:00, 22.34it/s, est. speed input: 19785.92 toks/s, output: 1462.50 toks/s]Processed prompts: 100%|██████████| 8/8 [00:00<00:00, 22.34it/s, est. speed input: 19785.92 toks/s, output: 1462.50 toks/s]Processed prompts: 100%|██████████| 8/8 [00:00<00:00, 19.55it/s, est. speed input: 19785.92 toks/s, output: 1462.50 toks/s]
+  [run 30]  max_il= 2161  max_ol=  119  OK                   e2e=      411ms  (0.4s)
+Rendering prompts:   0%|          | 0/8 [00:00<?, ?it/s]Rendering prompts: 100%|██████████| 8/8 [00:00<00:00, 6870.28it/s]
+Processed prompts:   0%|          | 0/8 [00:00<?, ?it/s, est. speed input: 0.00 toks/s, output: 0.00 toks/s]Processed prompts:  12%|█▎        | 1/8 [00:00<00:01,  5.50it/s, est. speed input: 2248.37 toks/s, output: 252.85 toks/s](EngineCore pid=17822) WARNING 05-11 09:11:25 [tpu_runner.py:808] Should not schedule a request that does nothing!
+Processed prompts: 100%|██████████| 8/8 [00:00<00:00,  5.50it/s, est. speed input: 24468.76 toks/s, output: 1915.39 toks/s]Processed prompts: 100%|██████████| 8/8 [00:00<00:00, 33.22it/s, est. speed input: 24468.76 toks/s, output: 1915.39 toks/s]
+  [run 31]  max_il= 1028  max_ol=   68  OK                   e2e=      242ms  (0.3s)
+Rendering prompts:   0%|          | 0/8 [00:00<?, ?it/s]Rendering prompts: 100%|██████████| 8/8 [00:00<00:00, 6849.24it/s]
+Processed prompts:   0%|          | 0/8 [00:00<?, ?it/s, est. speed input: 0.00 toks/s, output: 0.00 toks/s]Processed prompts:  12%|█▎        | 1/8 [00:00<00:00,  7.01it/s, est. speed input: 1374.74 toks/s, output: 217.41 toks/s](EngineCore pid=17822) WARNING 05-11 09:11:25 [tpu_runner.py:808] Should not schedule a request that does nothing!
+Processed prompts: 100%|██████████| 8/8 [00:00<00:00, 35.79it/s, est. speed input: 22102.95 toks/s, output: 1546.87 toks/s]Processed prompts: 100%|██████████| 8/8 [00:00<00:00, 35.79it/s, est. speed input: 22102.95 toks/s, output: 1546.87 toks/s]Processed prompts: 100%|██████████| 8/8 [00:00<00:00, 30.99it/s, est. speed input: 22102.95 toks/s, output: 1546.87 toks/s]
+  [run 32]  max_il= 1117  max_ol=   72  OK                   e2e=      260ms  (0.3s)
+Rendering prompts:   0%|          | 0/8 [00:00<?, ?it/s]Rendering prompts: 100%|██████████| 8/8 [00:00<00:00, 6648.39it/s]
+Processed prompts:   0%|          | 0/8 [00:00<?, ?it/s, est. speed input: 0.00 toks/s, output: 0.00 toks/s]Processed prompts:  12%|█▎        | 1/8 [00:00<00:01,  6.75it/s, est. speed input: 5453.21 toks/s, output: 222.69 toks/s]Processed prompts:  88%|████████▊ | 7/8 [00:00<00:00, 29.61it/s, est. speed input: 16628.98 toks/s, output: 1554.98 toks/s](EngineCore pid=17822) WARNING 05-11 09:11:25 [tpu_runner.py:808] Should not schedule a request that does nothing!
+Processed prompts: 100%|██████████| 8/8 [00:00<00:00, 29.61it/s, est. speed input: 18665.91 toks/s, output: 1620.72 toks/s]Processed prompts: 100%|██████████| 8/8 [00:00<00:00, 25.26it/s, est. speed input: 18665.91 toks/s, output: 1620.72 toks/s]
+  [run 33]  max_il= 1406  max_ol=   92  OK                   e2e=      318ms  (0.3s)
+Rendering prompts:   0%|          | 0/8 [00:00<?, ?it/s]Rendering prompts: 100%|██████████| 8/8 [00:00<00:00, 6624.76it/s]
+Processed prompts:   0%|          | 0/8 [00:00<?, ?it/s, est. speed input: 0.00 toks/s, output: 0.00 toks/s]Processed prompts:  12%|█▎        | 1/8 [00:00<00:00,  7.77it/s, est. speed input: 4062.49 toks/s, output: 201.93 toks/s]Processed prompts:  38%|███▊      | 3/8 [00:00<00:00, 13.02it/s, est. speed input: 12577.96 toks/s, output: 512.36 toks/s](EngineCore pid=17822) WARNING 05-11 09:11:26 [tpu_runner.py:808] Should not schedule a request that does nothing!
+Processed prompts: 100%|██████████| 8/8 [00:00<00:00, 27.67it/s, est. speed input: 18298.62 toks/s, output: 1449.29 toks/s]Processed prompts: 100%|██████████| 8/8 [00:00<00:00, 27.67it/s, est. speed input: 18298.62 toks/s, output: 1449.29 toks/s]Processed prompts: 100%|██████████| 8/8 [00:00<00:00, 22.85it/s, est. speed input: 18298.62 toks/s, output: 1449.29 toks/s]
+  [run 34]  max_il= 1728  max_ol=  105  OK                   e2e=      352ms  (0.4s)
+Rendering prompts:   0%|          | 0/8 [00:00<?, ?it/s]Rendering prompts: 100%|██████████| 8/8 [00:00<00:00, 6441.63it/s]
+Processed prompts:   0%|          | 0/8 [00:00<?, ?it/s, est. speed input: 0.00 toks/s, output: 0.00 toks/s]Processed prompts:  12%|█▎        | 1/8 [00:00<00:01,  5.87it/s, est. speed input: 12224.56 toks/s, output: 222.88 toks/s]Processed prompts:  75%|███████▌  | 6/8 [00:00<00:00, 24.26it/s, est. speed input: 17230.70 toks/s, output: 1178.02 toks/s](EngineCore pid=17822) WARNING 05-11 09:11:26 [tpu_runner.py:808] Should not schedule a request that does nothing!
+Processed prompts: 100%|██████████| 8/8 [00:00<00:00, 24.26it/s, est. speed input: 18791.43 toks/s, output: 1507.57 toks/s]Processed prompts: 100%|██████████| 8/8 [00:00<00:00, 22.04it/s, est. speed input: 18791.43 toks/s, output: 1507.57 toks/s]
+  [run 35]  max_il= 2084  max_ol=  106  OK                   e2e=      365ms  (0.4s)
+Rendering prompts:   0%|          | 0/8 [00:00<?, ?it/s]Rendering prompts: 100%|██████████| 8/8 [00:00<00:00, 6445.34it/s]
+Processed prompts:   0%|          | 0/8 [00:00<?, ?it/s, est. speed input: 0.00 toks/s, output: 0.00 toks/s]Processed prompts:  12%|█▎        | 1/8 [00:00<00:01,  5.26it/s, est. speed input: 3854.11 toks/s, output: 241.85 toks/s]Processed prompts:  88%|████████▊ | 7/8 [00:00<00:00, 25.76it/s, est. speed input: 15987.46 toks/s, output: 1481.71 toks/s](EngineCore pid=17822) WARNING 05-11 09:11:26 [tpu_runner.py:808] Should not schedule a request that does nothing!
+Processed prompts: 100%|██████████| 8/8 [00:00<00:00, 25.76it/s, est. speed input: 20299.55 toks/s, output: 1671.00 toks/s]Processed prompts: 100%|██████████| 8/8 [00:00<00:00, 23.49it/s, est. speed input: 20299.55 toks/s, output: 1671.00 toks/s]
+  [run 36]  max_il= 1841  max_ol=   99  OK                   e2e=      342ms  (0.4s)
+Rendering prompts:   0%|          | 0/8 [00:00<?, ?it/s]Rendering prompts: 100%|██████████| 8/8 [00:00<00:00, 6614.32it/s]
+Processed prompts:   0%|          | 0/8 [00:00<?, ?it/s, est. speed input: 0.00 toks/s, output: 0.00 toks/s]Processed prompts:  12%|█▎        | 1/8 [00:00<00:01,  6.08it/s, est. speed input: 4773.61 toks/s, output: 231.06 toks/s](EngineCore pid=17822) WARNING 05-11 09:11:27 [tpu_runner.py:808] Should not schedule a request that does nothing!
+Processed prompts: 100%|██████████| 8/8 [00:00<00:00, 35.75it/s, est. speed input: 23167.02 toks/s, output: 1870.06 toks/s]Processed prompts: 100%|██████████| 8/8 [00:00<00:00, 35.75it/s, est. speed input: 23167.02 toks/s, output: 1870.06 toks/s]Processed prompts: 100%|██████████| 8/8 [00:00<00:00, 30.20it/s, est. speed input: 23167.02 toks/s, output: 1870.06 toks/s]
+  [run 37]  max_il= 1573  max_ol=   73  OK                   e2e=      266ms  (0.3s)
+Rendering prompts:   0%|          | 0/8 [00:00<?, ?it/s]Rendering prompts: 100%|██████████| 8/8 [00:00<00:00, 6747.32it/s]
+Processed prompts:   0%|          | 0/8 [00:00<?, ?it/s, est. speed input: 0.00 toks/s, output: 0.00 toks/s]Processed prompts:  12%|█▎        | 1/8 [00:00<00:01,  5.40it/s, est. speed input: 7037.66 toks/s, output: 242.84 toks/s](EngineCore pid=17822) WARNING 05-11 09:11:27 [tpu_runner.py:808] Should not schedule a request that does nothing!
+Processed prompts: 100%|██████████| 8/8 [00:00<00:00, 24.38it/s, est. speed input: 16999.46 toks/s, output: 1308.62 toks/s]Processed prompts: 100%|██████████| 8/8 [00:00<00:00, 24.38it/s, est. speed input: 16999.46 toks/s, output: 1308.62 toks/s]Processed prompts: 100%|██████████| 8/8 [00:00<00:00, 21.53it/s, est. speed input: 16999.46 toks/s, output: 1308.62 toks/s]
+  [run 38]  max_il= 1304  max_ol=  112  OK                   e2e=      373ms  (0.4s)
+Rendering prompts:   0%|          | 0/8 [00:00<?, ?it/s]Rendering prompts: 100%|██████████| 8/8 [00:00<00:00, 6079.80it/s]
+Processed prompts:   0%|          | 0/8 [00:00<?, ?it/s, est. speed input: 0.00 toks/s, output: 0.00 toks/s]Processed prompts:  12%|█▎        | 1/8 [00:00<00:01,  6.18it/s, est. speed input: 3066.53 toks/s, output: 228.73 toks/s]Processed prompts:  75%|███████▌  | 6/8 [00:00<00:00, 23.41it/s, est. speed input: 11094.57 toks/s, output: 1222.77 toks/s](EngineCore pid=17822) WARNING 05-11 09:11:27 [tpu_runner.py:808] Should not schedule a request that does nothing!
+Processed prompts: 100%|██████████| 8/8 [00:00<00:00, 23.41it/s, est. speed input: 17402.53 toks/s, output: 1533.77 toks/s]Processed prompts: 100%|██████████| 8/8 [00:00<00:00, 21.86it/s, est. speed input: 17402.53 toks/s, output: 1533.77 toks/s]
+  [run 39]  max_il= 1578  max_ol=  109  OK                   e2e=      368ms  (0.4s)
+Rendering prompts:   0%|          | 0/8 [00:00<?, ?it/s]Rendering prompts: 100%|██████████| 8/8 [00:00<00:00, 6180.59it/s]
+Processed prompts:   0%|          | 0/8 [00:00<?, ?it/s, est. speed input: 0.00 toks/s, output: 0.00 toks/s]Processed prompts:  12%|█▎        | 1/8 [00:00<00:01,  6.43it/s, est. speed input: 4760.40 toks/s, output: 212.26 toks/s]Processed prompts:  75%|███████▌  | 6/8 [00:00<00:00, 26.01it/s, est. speed input: 22351.11 toks/s, output: 1166.21 toks/s](EngineCore pid=17822) WARNING 05-11 09:11:28 [tpu_runner.py:808] Should not schedule a request that does nothing!
+Processed prompts: 100%|██████████| 8/8 [00:00<00:00, 26.01it/s, est. speed input: 19964.80 toks/s, output: 1256.87 toks/s]Processed prompts: 100%|██████████| 8/8 [00:00<00:00, 19.15it/s, est. speed input: 19964.80 toks/s, output: 1256.87 toks/s]
+  [run 40]  max_il= 1646  max_ol=  126  OK                   e2e=      420ms  (0.4s)
+Rendering prompts:   0%|          | 0/8 [00:00<?, ?it/s]Rendering prompts: 100%|██████████| 8/8 [00:00<00:00, 6689.48it/s]
+Processed prompts:   0%|          | 0/8 [00:00<?, ?it/s, est. speed input: 0.00 toks/s, output: 0.00 toks/s]Processed prompts:  12%|█▎        | 1/8 [00:00<00:01,  6.32it/s, est. speed input: 4688.83 toks/s, output: 202.19 toks/s]Processed prompts:  75%|███████▌  | 6/8 [00:00<00:00, 24.30it/s, est. speed input: 16504.38 toks/s, output: 1017.72 toks/s](EngineCore pid=17822) WARNING 05-11 09:11:28 [tpu_runner.py:808] Should not schedule a request that does nothing!
+Processed prompts: 100%|██████████| 8/8 [00:00<00:00, 24.30it/s, est. speed input: 21114.03 toks/s, output: 1509.30 toks/s]Processed prompts: 100%|██████████| 8/8 [00:00<00:00, 27.18it/s, est. speed input: 21114.03 toks/s, output: 1509.30 toks/s]
+  [run 41]  max_il= 1485  max_ol=   80  OK                   e2e=      296ms  (0.3s)
+Rendering prompts:   0%|          | 0/8 [00:00<?, ?it/s]Rendering prompts: 100%|██████████| 8/8 [00:00<00:00, 6475.19it/s]
+Processed prompts:   0%|          | 0/8 [00:00<?, ?it/s, est. speed input: 0.00 toks/s, output: 0.00 toks/s]Processed prompts:  12%|█▎        | 1/8 [00:00<00:01,  4.90it/s, est. speed input: 3968.30 toks/s, output: 240.04 toks/s]Processed prompts:  62%|██████▎   | 5/8 [00:00<00:00, 17.34it/s, est. speed input: 9542.24 toks/s, output: 990.29 toks/s](EngineCore pid=17822) WARNING 05-11 09:11:29 [tpu_runner.py:808] Should not schedule a request that does nothing!
+Processed prompts: 100%|██████████| 8/8 [00:00<00:00, 12.35it/s, est. speed input: 11430.49 toks/s, output: 1195.34 toks/s]Processed prompts: 100%|██████████| 8/8 [00:00<00:00, 12.35it/s, est. speed input: 11430.49 toks/s, output: 1195.34 toks/s]Processed prompts: 100%|██████████| 8/8 [00:00<00:00, 12.27it/s, est. speed input: 11430.49 toks/s, output: 1195.34 toks/s]
+  [run 42]  max_il= 1939  max_ol=  207  OK                   e2e=      654ms  (0.7s)
+Rendering prompts:   0%|          | 0/8 [00:00<?, ?it/s]Rendering prompts: 100%|██████████| 8/8 [00:00<00:00, 6472.69it/s]
+Processed prompts:   0%|          | 0/8 [00:00<?, ?it/s, est. speed input: 0.00 toks/s, output: 0.00 toks/s]Processed prompts:  12%|█▎        | 1/8 [00:00<00:01,  4.79it/s, est. speed input: 2747.04 toks/s, output: 249.27 toks/s]Processed prompts:  88%|████████▊ | 7/8 [00:00<00:00, 26.80it/s, est. speed input: 16570.04 toks/s, output: 1526.09 toks/s](EngineCore pid=17822) WARNING 05-11 09:11:29 [tpu_runner.py:808] Should not schedule a request that does nothing!
+Processed prompts: 100%|██████████| 8/8 [00:00<00:00, 26.80it/s, est. speed input: 15069.95 toks/s, output: 1345.98 toks/s]Processed prompts: 100%|██████████| 8/8 [00:00<00:00, 17.42it/s, est. speed input: 15069.95 toks/s, output: 1345.98 toks/s]
+  [run 43]  max_il= 1740  max_ol=  141  OK                   e2e=      461ms  (0.5s)
+Rendering prompts:   0%|          | 0/8 [00:00<?, ?it/s]Rendering prompts: 100%|██████████| 8/8 [00:00<00:00, 6925.58it/s]
+Processed prompts:   0%|          | 0/8 [00:00<?, ?it/s, est. speed input: 0.00 toks/s, output: 0.00 toks/s]Processed prompts:  12%|█▎        | 1/8 [00:00<00:01,  6.97it/s, est. speed input: 5720.37 toks/s, output: 250.80 toks/s]Processed prompts:  88%|████████▊ | 7/8 [00:00<00:00, 31.90it/s, est. speed input: 17068.26 toks/s, output: 1426.22 toks/s](EngineCore pid=17822) WARNING 05-11 09:11:30 [tpu_runner.py:808] Should not schedule a request that does nothing!
+Processed prompts: 100%|██████████| 8/8 [00:00<00:00, 31.90it/s, est. speed input: 15682.21 toks/s, output: 1414.70 toks/s]Processed prompts: 100%|██████████| 8/8 [00:00<00:00, 24.49it/s, est. speed input: 15682.21 toks/s, output: 1414.70 toks/s]
+  [run 44]  max_il= 1089  max_ol=  101  OK                   e2e=      328ms  (0.3s)
+Rendering prompts:   0%|          | 0/8 [00:00<?, ?it/s]Rendering prompts: 100%|██████████| 8/8 [00:00<00:00, 6278.90it/s]
+Processed prompts:   0%|          | 0/8 [00:00<?, ?it/s, est. speed input: 0.00 toks/s, output: 0.00 toks/s]Processed prompts:  12%|█▎        | 1/8 [00:00<00:01,  5.85it/s, est. speed input: 8820.15 toks/s, output: 222.24 toks/s]Processed prompts:  88%|████████▊ | 7/8 [00:00<00:00, 22.63it/s, est. speed input: 18914.23 toks/s, output: 1243.81 toks/s](EngineCore pid=17822) WARNING 05-11 09:11:30 [tpu_runner.py:808] Should not schedule a request that does nothing!
+Processed prompts: 100%|██████████| 8/8 [00:00<00:00, 22.63it/s, est. speed input: 18120.79 toks/s, output: 1268.99 toks/s]Processed prompts: 100%|██████████| 8/8 [00:00<00:00, 17.93it/s, est. speed input: 18120.79 toks/s, output: 1268.99 toks/s]
+  [run 45]  max_il= 1513  max_ol=  134  OK                   e2e=      448ms  (0.5s)
+Rendering prompts:   0%|          | 0/8 [00:00<?, ?it/s]Rendering prompts: 100%|██████████| 8/8 [00:00<00:00, 6078.70it/s]
+Processed prompts:   0%|          | 0/8 [00:00<?, ?it/s, est. speed input: 0.00 toks/s, output: 0.00 toks/s]Processed prompts:  12%|█▎        | 1/8 [00:00<00:01,  5.87it/s, est. speed input: 2985.94 toks/s, output: 222.90 toks/s]Processed prompts:  75%|███████▌  | 6/8 [00:00<00:00, 24.24it/s, est. speed input: 24100.94 toks/s, output: 1191.02 toks/s](EngineCore pid=17822) WARNING 05-11 09:11:31 [tpu_runner.py:808] Should not schedule a request that does nothing!
+Processed prompts: 100%|██████████| 8/8 [00:00<00:00, 24.24it/s, est. speed input: 19704.33 toks/s, output: 1312.62 toks/s]Processed prompts: 100%|██████████| 8/8 [00:00<00:00, 18.85it/s, est. speed input: 19704.33 toks/s, output: 1312.62 toks/s]
+  [run 46]  max_il= 1957  max_ol=  129  OK                   e2e=      426ms  (0.4s)
+Rendering prompts:   0%|          | 0/8 [00:00<?, ?it/s]Rendering prompts: 100%|██████████| 8/8 [00:00<00:00, 5995.07it/s]
+Processed prompts:   0%|          | 0/8 [00:00<?, ?it/s, est. speed input: 0.00 toks/s, output: 0.00 toks/s]Processed prompts:  12%|█▎        | 1/8 [00:00<00:00,  7.11it/s, est. speed input: 3754.87 toks/s, output: 177.77 toks/s]Processed prompts:  88%|████████▊ | 7/8 [00:00<00:00, 20.63it/s, est. speed input: 17332.03 toks/s, output: 970.11 toks/s](EngineCore pid=17822) WARNING 05-11 09:11:31 [tpu_runner.py:808] Should not schedule a request that does nothing!
+Processed prompts: 100%|██████████| 8/8 [00:00<00:00, 20.63it/s, est. speed input: 16199.28 toks/s, output: 982.31 toks/s]Processed prompts: 100%|██████████| 8/8 [00:00<00:00, 15.17it/s, est. speed input: 16199.28 toks/s, output: 982.31 toks/s]
+  [run 47]  max_il= 2182  max_ol=  162  OK                   e2e=      529ms  (0.5s)
+Rendering prompts:   0%|          | 0/8 [00:00<?, ?it/s]Rendering prompts: 100%|██████████| 8/8 [00:00<00:00, 6660.27it/s]
+Processed prompts:   0%|          | 0/8 [00:00<?, ?it/s, est. speed input: 0.00 toks/s, output: 0.00 toks/s]Processed prompts:  12%|█▎        | 1/8 [00:00<00:01,  6.00it/s, est. speed input: 6753.52 toks/s, output: 234.10 toks/s](EngineCore pid=17822) WARNING 05-11 09:11:31 [tpu_runner.py:808] Should not schedule a request that does nothing!
+Processed prompts: 100%|██████████| 8/8 [00:00<00:00,  6.00it/s, est. speed input: 23290.50 toks/s, output: 1576.89 toks/s]Processed prompts: 100%|██████████| 8/8 [00:00<00:00, 32.00it/s, est. speed input: 23290.50 toks/s, output: 1576.89 toks/s]
+  [run 48]  max_il= 1742  max_ol=   70  OK                   e2e=      252ms  (0.3s)
+Rendering prompts:   0%|          | 0/8 [00:00<?, ?it/s]Rendering prompts: 100%|██████████| 8/8 [00:00<00:00, 6157.91it/s]
+Processed prompts:   0%|          | 0/8 [00:00<?, ?it/s, est. speed input: 0.00 toks/s, output: 0.00 toks/s]Processed prompts:  12%|█▎        | 1/8 [00:00<00:01,  6.33it/s, est. speed input: 2633.52 toks/s, output: 215.22 toks/s]Processed prompts:  75%|███████▌  | 6/8 [00:00<00:00, 20.66it/s, est. speed input: 16186.37 toks/s, output: 1098.00 toks/s](EngineCore pid=17822) WARNING 05-11 09:11:32 [tpu_runner.py:808] Should not schedule a request that does nothing!
+Processed prompts: 100%|██████████| 8/8 [00:00<00:00, 20.66it/s, est. speed input: 18994.30 toks/s, output: 1399.66 toks/s]Processed prompts: 100%|██████████| 8/8 [00:00<00:00, 18.50it/s, est. speed input: 18994.30 toks/s, output: 1399.66 toks/s]
+(EngineCore pid=17822) INFO 05-11 09:11:32 [core.py:1234] Shutdown initiated (timeout=0)
+(EngineCore pid=17822) INFO 05-11 09:11:32 [core.py:1257] Shutdown complete
+  [run 49]  max_il= 1718  max_ol=  130  OK                   e2e=      434ms  (0.5s)
+
+[DONE]
+  /app/LLMServingSim/studies/tpu_baseline/results/lens_vllm/Llama-3.2-1B-Instruct/tp1/bs8/cnn_20260511_091132.csv  (50 rows)
+  /app/LLMServingSim/studies/tpu_baseline/results/lens_vllm/Llama-3.2-1B-Instruct/tp1/bs8/cnn_20260511_091132.json
+  latest -> cnn.csv

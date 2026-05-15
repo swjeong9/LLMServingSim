@@ -1,0 +1,89 @@
+─────────────────────────────── LLMServingSim2.0 ───────────────────────────────
+  A Unified Simulator for Heterogeneous Hardware and Serving Techniques in LLM  
+────────────────────────────────────────────────────────────────────────────────
+      _    _    __  __ ___              _           ___ _       ___   __        
+     | |  | |  |  \/  / __| ___ _ ___ _(_)_ _  __ _/ __(_)_ __ |_  ) /  \       
+     | |__| |__| |\/| \__ \/ -_) '_\ V / | ' \/ _` \__ \ | '  \ / / | () |      
+     |____|____|_|  |_|___/\___|_|  \_/|_|_||_\__, |___/_|_|_|_/___(_)__/       
+                                              |___/                             
+────────────────────────────────────────────────────────────────────────────────
+                              Input configuration                               
+
+  • Cluster config             : configs/cluster/tpu_v6e_llama1b_tp1.json
+  • Dataset                    : studies/tpu_baseline/workloads/cnn_bs1.jsonl
+  • Max num seqs               : 1
+  • Max batched tokens         : 8192
+  • Block size (tokens)        : 16
+  • Request routing            : LOAD
+  • Expert routing             : BALANCED
+  • Prefix caching             : DISABLED
+  • Chunked prefill            : DISABLED
+  • Prefix caching scheme      : xPU-Only
+  • Centralized prefix caching : DISABLED
+  • Offload attention to PIM   : DISABLED
+  • Sub-batch interleaving     : DISABLED
+  • Prioritize prefill         : DISABLED
+  • Network backend            : analytical
+  • Log interval (s)           : 1.0
+  • Log level                  : WARNING
+────────────────────────────────────────────────────────────────────────────────
+▶ Starting simulation...
+
+[03:08:08.961] [TraceGenerator] WARNING  max-num-batched-tokens=8192 exceeds profiled 3072 for TPU-v6e-1/meta-llama/Llama-3.2-1B-Instruct/bf16; attention/dense lookups will extrapolate
+[1.0s] Avg prompt throughput: 6525.0 tokens/s, Avg generation throughput: 398.0 tokens/s
+        ├─Running Instance[0]: 1 reqs, Waiting: 43 reqs, Total # 1 NPUs, Each NPU Memory Usage 2885.13 MB (8.805 % Used)
+        └─Node[0]: Total CPU Memory Usage 0.00 MB, 0.000 % Used 
+[2.0s] Avg prompt throughput: 7598.0 tokens/s, Avg generation throughput: 386.0 tokens/s
+        ├─Running Instance[0]: 1 reqs, Waiting: 37 reqs, Total # 1 NPUs, Each NPU Memory Usage 2910.63 MB (8.883 % Used)
+        └─Node[0]: Total CPU Memory Usage 0.00 MB, 0.000 % Used 
+[3.0s] Avg prompt throughput: 3630.0 tokens/s, Avg generation throughput: 414.0 tokens/s
+        ├─Running Instance[0]: 1 reqs, Waiting: 32 reqs, Total # 1 NPUs, Each NPU Memory Usage 2872.13 MB (8.765 % Used)
+        └─Node[0]: Total CPU Memory Usage 0.00 MB, 0.000 % Used 
+[4.0s] Avg prompt throughput: 3751.0 tokens/s, Avg generation throughput: 420.0 tokens/s
+        ├─Running Instance[0]: 1 reqs, Waiting: 26 reqs, Total # 1 NPUs, Each NPU Memory Usage 2884.63 MB (8.803 % Used)
+        └─Node[0]: Total CPU Memory Usage 0.00 MB, 0.000 % Used 
+[5.0s] Avg prompt throughput: 6161.0 tokens/s, Avg generation throughput: 403.0 tokens/s
+        ├─Running Instance[0]: 1 reqs, Waiting: 19 reqs, Total # 1 NPUs, Each NPU Memory Usage 2901.63 MB (8.855 % Used)
+        └─Node[0]: Total CPU Memory Usage 0.00 MB, 0.000 % Used 
+[6.0s] Avg prompt throughput: 7561.0 tokens/s, Avg generation throughput: 392.0 tokens/s
+        ├─Running Instance[0]: 1 reqs, Waiting: 11 reqs, Total # 1 NPUs, Each NPU Memory Usage 2881.63 MB (8.794 % Used)
+        └─Node[0]: Total CPU Memory Usage 0.00 MB, 0.000 % Used 
+[7.0s] Avg prompt throughput: 6578.0 tokens/s, Avg generation throughput: 390.0 tokens/s
+        ├─Running Instance[0]: 1 reqs, Waiting: 5 reqs, Total # 1 NPUs, Each NPU Memory Usage 2876.63 MB (8.779 % Used)
+        └─Node[0]: Total CPU Memory Usage 0.00 MB, 0.000 % Used 
+────────────────────────────────────────────────────────────────────────────────
+▶ Exiting simulation...
+
+Checking Non-Exited Systems ...
+All Request Has Been Exited
+────────────────────────────────────────────────────────────────────────────────
+▶ Simulation results...
+
+Total simulation time: 0h 2m 54.672s
+────────────────────────────── Throughput Results ──────────────────────────────
+Total requests:                                                     50
+Total clocks (ns):                                                  7691140107
+Total latency (s):                                                  7.691
+Total input tokens:                                                 45668
+Total generated tokens:                                             3082
+Request throughput (req/s):                                         6.50
+Average prompt throughput (tok/s):                                  5937.74
+Average generation throughput (tok/s):                              400.72
+Total token throughput (tok/s):                                     6338.46
+Throughput per 1.0 sec ([prompt_throughput], [gen_throughput]): [(6525.0, 398.0), (7598.0, 386.0), (3630.0, 414.0), (3751.0, 420.0), (6161.0, 403.0), (7561.0, 392.0), (6578.0, 390.0)]
+────────────────────────────────────────────────────────────────────────────────
+───────────────────────────────── Instance [0] ─────────────────────────────────
+───────────────────────────── Time to First Token ──────────────────────────────
+Mean TTFT (ms):                                                     3969.17
+Median TTFT (ms):                                                   4265.86
+P99 TTFT (ms):                                                      7480.41
+─────────────────── Time per Output Token (excl. 1st token) ────────────────────
+Mean TPOT (ms):                                                     2.25
+Median TPOT (ms):                                                   2.24
+P99 TPOT (ms):                                                      2.27
+───────────────────────────── Inter-token Latency ──────────────────────────────
+Mean ITL (ms) :                                                     2.25
+Median ITL (ms) :                                                   2.24
+P99 ITL (ms) :                                                      2.29
+────────────────────────────────────────────────────────────────────────────────
+Saving each request's information to output file: studies/tpu_baseline/results/sim/Llama-3.2-1B/tp1/bs1/cnn.csv

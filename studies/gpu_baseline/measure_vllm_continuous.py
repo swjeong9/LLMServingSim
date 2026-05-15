@@ -142,6 +142,10 @@ def measure_continuous(llm, tokenizer, samples, max_model_len, batch_size):
     output_lens = [s["output_len"] for s in samples]
     sample_ids  = [s["sample_id"]  for s in samples]
     max_il, max_ol = max(input_lens), max(output_lens)
+    # vLLM rejects when a SINGLE sequence's il+ol > max_model_len. Aggregate
+    # max_il + max_ol can come from different rows and gives a false positive,
+    # so check per-row instead.
+    max_pair = max(il + ol for il, ol in zip(input_lens, output_lens))
 
     base = {
         "run_id":      0,                 # placeholder — single sweep
@@ -152,12 +156,13 @@ def measure_continuous(llm, tokenizer, samples, max_model_len, batch_size):
         "output_lens": json.dumps(output_lens),
         "max_input_len":  max_il,
         "max_output_len": max_ol,
+        "max_il_plus_ol": max_pair,
     }
-    if max_il + max_ol > max_model_len:
+    if max_pair > max_model_len:
         return {**base, "status": "SKIPPED_TOO_LONG",
                 "max_n_generated": "",
                 "batch_ttft_ms": "", "batch_e2e_ms": "",
-                "error": f"max_il({max_il}) + max_ol({max_ol}) > "
+                "error": f"max(il+ol) any row ({max_pair}) > "
                          f"max_model_len({max_model_len})"}
 
     prompts = [{"prompt_token_ids": make_input_ids(tokenizer, il)}
